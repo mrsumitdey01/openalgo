@@ -88,6 +88,10 @@ def run_backtest(params: dict) -> tuple[bool, dict, int]:
         if not symbol:
             return False, {"status": "error", "message": "Symbol is required"}, 400
 
+        valid_strategies = ["sma_crossover", "ema_crossover", "rsi", "macd"]
+        if strategy_name not in valid_strategies:
+            return False, {"status": "error", "message": f"Unsupported strategy '{strategy_name}'"}, 400
+
         # Convert date strings to timestamps
         start_ts = None
         end_ts = None
