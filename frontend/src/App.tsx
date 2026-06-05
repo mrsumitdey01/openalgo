@@ -52,6 +52,7 @@ const WebSocketTest = lazy(() => import('@/pages/WebSocketTest'))
 const Playground = lazy(() => import('@/pages/Playground'))
 const Historify = lazy(() => import('@/pages/Historify'))
 const HistorifyCharts = lazy(() => import('@/pages/HistorifyCharts'))
+const Backtest = lazy(() => import('@/pages/Backtest'))
 
 // Tools & Option Chain
 const Tools = lazy(() => import('@/pages/Tools'))
@@ -69,7 +70,7 @@ const StrategyBuilder = lazy(() => import('@/pages/StrategyBuilder'))
 const StrategyPortfolio = lazy(() => import('@/pages/StrategyPortfolio'))
 
 // Strategy pages
-const StrategyIndex = lazy(() => import('@/pages/strategy/StrategyIndex'))
+// const StrategyIndex = lazy(() => import('@/pages/strategy/StrategyIndex'))
 const NewStrategy = lazy(() => import('@/pages/strategy/NewStrategy'))
 const ViewStrategy = lazy(() => import('@/pages/strategy/ViewStrategy'))
 const ConfigureSymbols = lazy(() => import('@/pages/strategy/ConfigureSymbols'))
@@ -217,7 +218,8 @@ function App() {
                 <Route path="/websocket/test/30" element={<WebSocketTest depthLevel={30} />} />
                 <Route path="/websocket/test/50" element={<WebSocketTest depthLevel={50} />} />
                 {/* Phase 6: Webhook Strategies */}
-                <Route path="/strategy" element={<StrategyIndex />} />
+                <Route path="/backtest" element={<Backtest />} />
+                <Route path="/strategy" element={<NewStrategy />} />
                 <Route path="/strategy/new" element={<NewStrategy />} />
                 <Route path="/strategy/:strategyId" element={<ViewStrategy />} />
                 <Route path="/strategy/:strategyId/configure" element={<ConfigureSymbols />} />

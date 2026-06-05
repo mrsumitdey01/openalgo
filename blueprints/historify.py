@@ -1553,3 +1553,19 @@ def get_schedule_executions(schedule_id):
     except Exception as e:
         logger.exception(f"Error getting executions: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@historify_bp.route("/api/backtest", methods=["POST"])
+@check_session_validity
+def run_backtest_route():
+    """Run backtest on stored historical data."""
+    try:
+        from services.backtest_service import run_backtest
+
+        data = request.get_json() or {}
+        success, response, status_code = run_backtest(data)
+        return jsonify(response), status_code
+    except Exception as e:
+        logger.exception(f"Error in backtest route: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+

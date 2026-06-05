@@ -1,0 +1,1107 @@
+import {
+  Activity,
+  AlertCircle,
+  ArrowDownRight,
+  ArrowUpRight,
+  Calendar,
+  CheckCircle2,
+  DollarSign,
+  Info,
+  Loader2,
+  Percent,
+  Play,
+  RefreshCw,
+  TrendingUp,
+} from 'lucide-react'
+import type * as PlotlyTypes from 'plotly.js'
+import { useEffect, useMemo, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import Plot from '@/lib/Plot2D'
+import { useThemeStore } from '@/stores/themeStore'
+import { showToast } from '@/utils/toast'
+
+interface CatalogItem {
+  symbol: string
+  exchange: string
+  interval: string
+  first_timestamp: number
+  last_timestamp: number
+  record_count: number
+  last_download_at?: string
+}
+
+interface Trade {
+  id: number
+  direction: 'BUY' | 'SELL'
+  qty: number
+  entry_time: string
+  entry_price: number
+  entry_fee: number
+  exit_time: string
+  exit_price: number
+  exit_fee: number
+  gross_pnl: number
+  net_pnl: number
+  pnl_pct: number
+  exit_reason: string
+}
+
+interface ChartBar {
+  timestamp: number
+  datetime: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+  capital: number
+  fast_indicator?: number
+  slow_indicator?: number
+  rsi?: number
+  macd_line?: number
+  signal_line?: number
+  macd_hist?: number
+  buy_marker?: boolean
+  sell_marker?: boolean
+}
+
+interface BacktestMetrics {
+  initial_capital: number
+  final_capital: number
+  net_pnl: number
+  roi_pct: number
+  total_trades: number
+  win_rate_pct: number
+  winning_trades: number
+  losing_trades: number
+  profit_factor: number
+  max_drawdown_pct: number
+  avg_trade_pnl: number
+}
+
+interface BacktestResponse {
+  status: 'success' | 'error'
+  symbol: string
+  exchange: string
+  interval: string
+  strategy: string
+  metrics: BacktestMetrics
+  trades: Trade[]
+  chart_data: ChartBar[]
+  message?: string
+}
+
+export default function Backtest() {
+  const { mode, appMode } = useThemeStore()
+  const isDark = mode === 'dark' || appMode === 'analyzer'
+
+  // Catalog state
+  const [catalog, setCatalog] = useState<CatalogItem[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+
+  // Form selections
+  const [selectedSymbolKey, setSelectedSymbolKey] = useState('') // Format: EXCHANGE:SYMBOL
+  const [selectedInterval, setSelectedInterval] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
+  const [strategy, setStrategy] = useState('ema_crossover')
+
+  // Financial inputs
+  const [capital, setCapital] = useState('100000')
+  const [slippage, setSlippage] = useState('0.05')
+  const [commissionFlat, setCommissionFlat] = useState('20')
+  const [commissionPct, setCommissionPct] = useState('0.03')
+
+  // Strategy specific parameter inputs
+  const [fastPeriod, setFastPeriod] = useState('9')
+  const [slowPeriod, setSlowPeriod] = useState('21')
+  const [rsiPeriod, setRsiPeriod] = useState('14')
+  const [rsiOversold, setRsiOversold] = useState('30')
+  const [rsiOverbought, setRsiOverbought] = useState('70')
+  const [macdFast, setMacdFast] = useState('12')
+  const [macdSlow, setMacdSlow] = useState('26')
+  const [macdSignal, setMacdSignal] = useState('9')
+
+  // Execution state
+  const [running, setRunning] = useState(false)
+  const [backtestResult, setBacktestResult] = useState<BacktestResponse | null>(null)
+
+  // Load catalog on mount
+  useEffect(() => {
+    loadCatalog()
+  }, [])
+
+  const loadCatalog = async () => {
+    setCatalogLoading(true)
+    try {
+      const response = await fetch('/historify/api/catalog', { credentials: 'include' })
+      const data = await response.json()
+      if (data.status === 'success') {
+        const items: CatalogItem[] = data.data || []
+        setCatalog(items)
+        // Set default symbol if available
+        if (items.length > 0) {
+          const firstItem = items[0]
+          const key = `${firstItem.exchange}:${firstItem.symbol}`
+          setSelectedSymbolKey(key)
+          setSelectedInterval(firstItem.interval)
+
+          // Pre-populate date range based on that symbol's range
+          if (firstItem.first_timestamp) {
+            const startStr = new Date(firstItem.first_timestamp * 1000)
+              .toISOString()
+              .split('T')[0]
+            setStartDate(startStr)
+          }
+          if (firstItem.last_timestamp) {
+            const endStr = new Date(firstItem.last_timestamp * 1000)
+              .toISOString()
+              .split('T')[0]
+            setEndDate(endStr)
+          }
+        }
+      } else {
+        showToast.error(data.message || 'Failed to load historical data catalog')
+      }
+    } catch {
+      showToast.error('Error connecting to historical data service')
+    } finally {
+      setCatalogLoading(false)
+    }
+  };
+
+  // Group catalog to show unique symbols in dropdown
+  const uniqueSymbols = useMemo(() => {
+    const seen = new Set<string>()
+    const results: { key: string; label: string; exchange: string; symbol: string }[] = []
+
+    for (const item of catalog) {
+      const key = `${item.exchange}:${item.symbol}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        results.push({
+          key,
+          label: `${item.symbol} (${item.exchange})`,
+          exchange: item.exchange,
+          symbol: item.symbol,
+        })
+      }
+    }
+    return results
+  }, [catalog])
+
+  // Get available intervals for selected symbol
+  const availableIntervals = useMemo(() => {
+    if (!selectedSymbolKey) return []
+    const [exchange, symbol] = selectedSymbolKey.split(':')
+    return catalog
+      .filter((item) => item.symbol === symbol && item.exchange === exchange)
+      .map((item) => item.interval)
+  }, [selectedSymbolKey, catalog])
+
+  // Automatically update interval and dates when symbol changes
+  const handleSymbolChange = (key: string) => {
+    setSelectedSymbolKey(key)
+    const [exchange, symbol] = key.split(':')
+    const matches = catalog.filter((item) => item.symbol === symbol && item.exchange === exchange)
+    if (matches.length > 0) {
+      // Pick first interval
+      setSelectedInterval(matches[0].interval)
+
+      // Get overall min/max timestamps for this symbol
+      const firstTimestamps = matches.map((m) => m.first_timestamp).filter(Boolean)
+      const lastTimestamps = matches.map((m) => m.last_timestamp).filter(Boolean)
+
+      if (firstTimestamps.length > 0) {
+        const minTs = Math.min(...firstTimestamps)
+        setStartDate(new Date(minTs * 1000).toISOString().split('T')[0])
+      }
+      if (lastTimestamps.length > 0) {
+        const maxTs = Math.max(...lastTimestamps)
+        setEndDate(new Date(maxTs * 1000).toISOString().split('T')[0])
+      }
+    }
+  }
+
+  // Handle run backtest
+  const handleRunBacktest = async () => {
+    if (!selectedSymbolKey) {
+      showToast.error('Please select a symbol')
+      return
+    }
+    if (!selectedInterval) {
+      showToast.error('Please select an interval')
+      return
+    }
+    if (!startDate || !endDate) {
+      showToast.error('Please select start and end dates')
+      return
+    }
+
+    const [exchange, symbol] = selectedSymbolKey.split(':')
+
+    // Collect parameters
+    const strategyParams: Record<string, number> = {}
+    if (strategy === 'sma_crossover' || strategy === 'ema_crossover') {
+      strategyParams.fast_period = Number.parseInt(fastPeriod) || 9
+      strategyParams.slow_period = Number.parseInt(slowPeriod) || 21
+    } else if (strategy === 'rsi') {
+      strategyParams.period = Number.parseInt(rsiPeriod) || 14
+      strategyParams.oversold = Number.parseFloat(rsiOversold) || 30
+      strategyParams.overbought = Number.parseFloat(rsiOverbought) || 70
+    } else if (strategy === 'macd') {
+      strategyParams.fast_period = Number.parseInt(macdFast) || 12
+      strategyParams.slow_period = Number.parseInt(macdSlow) || 26
+      strategyParams.signal_period = Number.parseInt(macdSignal) || 9
+    }
+
+    const payload = {
+      symbol,
+      exchange,
+      interval: selectedInterval,
+      start_date: startDate,
+      end_date: endDate,
+      strategy,
+      strategy_params: strategyParams,
+      capital: Number.parseFloat(capital) || 100000,
+      slippage_pct: Number.parseFloat(slippage) || 0.05,
+      commission_flat: Number.parseFloat(commissionFlat) || 20,
+      commission_pct: Number.parseFloat(commissionPct) || 0.03,
+    }
+
+    setRunning(true)
+    setBacktestResult(null)
+
+    try {
+      const response = await fetch('/historify/api/backtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (data.status === 'success') {
+        setBacktestResult(data)
+        showToast.success(`Backtest completed for ${symbol}!`)
+      } else {
+        showToast.error(data.message || 'Backtest failed')
+      }
+    } catch {
+      showToast.error('Failed to run backtest simulation')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  // Layout Theme colors for Plotly
+  const themeColors = useMemo(
+    () => ({
+      bg: 'rgba(0,0,0,0)',
+      paper: 'rgba(0,0,0,0)',
+      text: isDark ? '#e0e0e0' : '#333333',
+      grid: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+      fastLine: '#3b82f6',
+      slowLine: '#f59e0b',
+      rsiLine: '#8b5cf6',
+      macdLine: '#3b82f6',
+      signalLine: '#ec4899',
+      histUp: 'rgba(16, 185, 129, 0.6)',
+      histDown: 'rgba(239, 68, 68, 0.6)',
+      spotLine: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)',
+      hoverBg: isDark ? '#1e293b' : '#ffffff',
+      hoverFont: isDark ? '#e0e0e0' : '#333333',
+      hoverBorder: isDark ? '#475569' : '#e2e8f0',
+    }),
+    [isDark]
+  )
+
+  // Configure Main Price Chart (Candlesticks + Indicators + Trade Signals)
+  const mainPlot = useMemo(() => {
+    if (!backtestResult?.chart_data) return { data: [], layout: {} }
+
+    const data = backtestResult.chart_data
+    const trades = backtestResult.trades
+
+    const times = data.map((d) => d.datetime)
+    const opens = data.map((d) => d.open)
+    const highs = data.map((d) => d.high)
+    const lows = data.map((d) => d.low)
+    const closes = data.map((d) => d.close)
+
+    const traces: PlotlyTypes.Data[] = [
+      {
+        x: times,
+        open: opens,
+        high: highs,
+        low: lows,
+        close: closes,
+        type: 'candlestick',
+        name: 'Price',
+        increasing: { line: { color: '#10b981' } },
+        decreasing: { line: { color: '#ef4444' } },
+        line: { width: 1 },
+      },
+    ]
+
+    // Overlay Fast & Slow Indicators for Crossover strategies
+    if (backtestResult.strategy === 'sma_crossover' || backtestResult.strategy === 'ema_crossover') {
+      const fasts = data.map((d) => d.fast_indicator)
+      const slows = data.map((d) => d.slow_indicator)
+
+      if (fasts.some((v) => v !== undefined)) {
+        traces.push({
+          x: times,
+          y: fasts as number[],
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Fast Indicator',
+          line: { color: themeColors.fastLine, width: 1.5 },
+        })
+      }
+      if (slows.some((v) => v !== undefined)) {
+        traces.push({
+          x: times,
+          y: slows as number[],
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Slow Indicator',
+          line: { color: themeColors.slowLine, width: 1.5 },
+        })
+      }
+    }
+
+    // Add actual Buy and Sell Trade Marks
+    if (trades && trades.length > 0) {
+      const buyX: string[] = []
+      const buyY: number[] = []
+      const sellX: string[] = []
+      const sellY: number[] = []
+
+      for (const t of trades) {
+        buyX.push(t.entry_time)
+        buyY.push(t.entry_price)
+        sellX.push(t.exit_time)
+        sellY.push(t.exit_price)
+      }
+
+      traces.push({
+        x: buyX,
+        y: buyY,
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Buy Signals',
+        marker: { symbol: 'triangle-up', size: 10, color: '#10b981' },
+        hovertemplate: 'Buy Entry Price: %{y:.2f}<extra></extra>',
+      })
+
+      traces.push({
+        x: sellX,
+        y: sellY,
+        type: 'scatter',
+        mode: 'markers',
+        name: 'Sell Signals',
+        marker: { symbol: 'triangle-down', size: 10, color: '#ef4444' },
+        hovertemplate: 'Sell Exit Price: %{y:.2f}<extra></extra>',
+      })
+    }
+
+    const layout: Partial<PlotlyTypes.Layout> = {
+      paper_bgcolor: themeColors.paper,
+      plot_bgcolor: themeColors.bg,
+      font: { color: themeColors.text, family: 'system-ui, sans-serif' },
+      xaxis: {
+        gridcolor: themeColors.grid,
+        rangeslider: { visible: false },
+        tickfont: { color: themeColors.text, size: 10 },
+      },
+      yaxis: {
+        gridcolor: themeColors.grid,
+        tickfont: { color: themeColors.text, size: 10 },
+        title: { text: 'Price', font: { size: 12, color: themeColors.text } },
+      },
+      margin: { l: 50, r: 20, t: 10, b: 30 },
+      hovermode: 'x unified',
+      hoverlabel: {
+        bgcolor: themeColors.hoverBg,
+        font: { color: themeColors.hoverFont },
+        bordercolor: themeColors.hoverBorder,
+      },
+      showlegend: true,
+      legend: {
+        orientation: 'h',
+        x: 0.5,
+        xanchor: 'center',
+        y: 1.1,
+        font: { size: 11 },
+      },
+      height: 380,
+    }
+
+    return { data: traces, layout }
+  }, [backtestResult, themeColors])
+
+  // Configure Secondary Indicator Chart (RSI or MACD Subplots)
+  const secondaryPlot = useMemo(() => {
+    if (!backtestResult?.chart_data) return null
+
+    const data = backtestResult.chart_data
+    const times = data.map((d) => d.datetime)
+
+    if (backtestResult.strategy === 'rsi') {
+      const rsis = data.map((d) => d.rsi)
+      const oversolds = Array(times.length).fill(Number.parseInt(rsiOversold) || 30)
+      const overboughts = Array(times.length).fill(Number.parseInt(rsiOverbought) || 70)
+
+      const traces: PlotlyTypes.Data[] = [
+        {
+          x: times,
+          y: rsis as number[],
+          type: 'scatter',
+          mode: 'lines',
+          name: 'RSI',
+          line: { color: themeColors.rsiLine, width: 1.5 },
+        },
+        {
+          x: times,
+          y: oversolds,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Oversold (30)',
+          line: { color: '#ef4444', width: 1, dash: 'dash' },
+          showlegend: false,
+        },
+        {
+          x: times,
+          y: overboughts,
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Overbought (70)',
+          line: { color: '#10b981', width: 1, dash: 'dash' },
+          showlegend: false,
+        },
+      ]
+
+      const layout: Partial<PlotlyTypes.Layout> = {
+        paper_bgcolor: themeColors.paper,
+        plot_bgcolor: themeColors.bg,
+        font: { color: themeColors.text, family: 'system-ui, sans-serif' },
+        xaxis: { gridcolor: themeColors.grid, tickfont: { color: themeColors.text, size: 10 } },
+        yaxis: {
+          gridcolor: themeColors.grid,
+          tickfont: { color: themeColors.text, size: 10 },
+          range: [0, 100],
+          title: { text: 'RSI', font: { size: 12, color: themeColors.text } },
+        },
+        margin: { l: 50, r: 20, t: 5, b: 30 },
+        hovermode: 'x unified',
+        height: 180,
+        showlegend: false,
+      }
+
+      return { data: traces, layout }
+    }
+
+    if (backtestResult.strategy === 'macd') {
+      const macdLine = data.map((d) => d.macd_line)
+      const sigLine = data.map((d) => d.signal_line)
+      const hist = data.map((d) => d.macd_hist)
+
+      // Histogram colors based on positive/negative
+      const histColors = hist.map((v) =>
+        (v || 0) >= 0 ? themeColors.histUp : themeColors.histDown
+      )
+
+      const traces: PlotlyTypes.Data[] = [
+        {
+          x: times,
+          y: macdLine as number[],
+          type: 'scatter',
+          mode: 'lines',
+          name: 'MACD',
+          line: { color: themeColors.macdLine, width: 1.5 },
+        },
+        {
+          x: times,
+          y: sigLine as number[],
+          type: 'scatter',
+          mode: 'lines',
+          name: 'Signal',
+          line: { color: themeColors.signalLine, width: 1.5 },
+        },
+        {
+          x: times,
+          y: hist as number[],
+          type: 'bar',
+          name: 'Histogram',
+          marker: { color: histColors },
+        },
+      ]
+
+      const layout: Partial<PlotlyTypes.Layout> = {
+        paper_bgcolor: themeColors.paper,
+        plot_bgcolor: themeColors.bg,
+        font: { color: themeColors.text, family: 'system-ui, sans-serif' },
+        xaxis: { gridcolor: themeColors.grid, tickfont: { color: themeColors.text, size: 10 } },
+        yaxis: {
+          gridcolor: themeColors.grid,
+          tickfont: { color: themeColors.text, size: 10 },
+          title: { text: 'MACD', font: { size: 12, color: themeColors.text } },
+        },
+        margin: { l: 50, r: 20, t: 5, b: 30 },
+        hovermode: 'x unified',
+        height: 180,
+        showlegend: false,
+      }
+
+      return { data: traces, layout }
+    }
+
+    return null
+  }, [backtestResult, themeColors, rsiOversold, rsiOverbought])
+
+  return (
+    <div className="py-6 space-y-6 container mx-auto px-4 max-w-7xl">
+      {/* Page Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between border-b border-border pb-4 gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight">Backtesting Lab</h1>
+          <p className="text-muted-foreground mt-1">
+            Simulate custom strategies on DuckDB historical data using our backtest simulator.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadCatalog}
+            disabled={catalogLoading || running}
+          >
+            {catalogLoading ? (
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Refresh Catalog
+          </Button>
+        </div>
+      </div>
+
+      {catalog.length === 0 && !catalogLoading && (
+        <Card className="border-dashed border-2 flex flex-col items-center justify-center p-8 text-center bg-muted/20">
+          <AlertCircle className="h-10 w-10 text-yellow-500 mb-3" />
+          <h3 className="font-semibold text-lg">No Historical Data Available</h3>
+          <p className="text-muted-foreground max-w-md mt-1 text-sm">
+            Historify's local database does not have downloaded data. Please head to the{' '}
+            <a href="/historify" className="text-primary hover:underline font-semibold">
+              Historify page
+            </a>{' '}
+            to download some historical datasets first.
+          </p>
+        </Card>
+      )}
+
+      {catalog.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* CONFIGURATION SIDEBAR */}
+          <Card className="lg:col-span-4 border border-border/80 shadow-md">
+            <CardHeader>
+              <CardTitle className="text-lg font-bold flex items-center gap-2">
+                <Play className="h-5 w-5 text-primary" /> Setup Parameters
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Data selector */}
+              <div className="space-y-2">
+                <Label htmlFor="backtest-symbol">Symbol & Exchange</Label>
+                <Select value={selectedSymbolKey} onValueChange={handleSymbolChange}>
+                  <SelectTrigger id="backtest-symbol">
+                    <SelectValue placeholder="Select Symbol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uniqueSymbols.map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="backtest-interval">Interval</Label>
+                  <Select value={selectedInterval} onValueChange={setSelectedInterval}>
+                    <SelectTrigger id="backtest-interval">
+                      <SelectValue placeholder="Interval" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableIntervals.map((interval) => (
+                        <SelectItem key={interval} value={interval}>
+                          {interval}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="backtest-strategy">Strategy</Label>
+                  <Select value={strategy} onValueChange={setStrategy}>
+                    <SelectTrigger id="backtest-strategy">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ema_crossover">EMA Crossover</SelectItem>
+                      <SelectItem value="sma_crossover">SMA Crossover</SelectItem>
+                      <SelectItem value="rsi">RSI Oversold/Bought</SelectItem>
+                      <SelectItem value="macd">MACD Signal Cross</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Date pickers */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="backtest-start-date" className="flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" /> Start Date
+                  </Label>
+                  <Input
+                    id="backtest-start-date"
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="backtest-end-date" className="flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" /> End Date
+                  </Label>
+                  <Input
+                    id="backtest-end-date"
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-border/80 my-2 pt-2" />
+
+              {/* Financial Options */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-muted-foreground">Capital & Fees</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="backtest-capital">Starting Capital</Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="backtest-capital"
+                        type="number"
+                        className="pl-8"
+                        value={capital}
+                        onChange={(e) => setCapital(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="backtest-slippage">Slippage %</Label>
+                    <div className="relative">
+                      <Percent className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        id="backtest-slippage"
+                        type="number"
+                        step="0.01"
+                        className="pl-8"
+                        value={slippage}
+                        onChange={(e) => setSlippage(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="backtest-commission-flat">Brokerage Flat (₹)</Label>
+                    <Input
+                      id="backtest-commission-flat"
+                      type="number"
+                      value={commissionFlat}
+                      onChange={(e) => setCommissionFlat(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="backtest-commission-pct">Brokerage %</Label>
+                    <Input
+                      id="backtest-commission-pct"
+                      type="number"
+                      step="0.001"
+                      value={commissionPct}
+                      onChange={(e) => setCommissionPct(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border/80 my-2 pt-2" />
+
+              {/* Dynamic Strategy Parameters */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-muted-foreground">Strategy Parameters</h4>
+
+                {(strategy === 'ema_crossover' || strategy === 'sma_crossover') && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="backtest-fast-period">Fast Period</Label>
+                      <Input
+                        id="backtest-fast-period"
+                        type="number"
+                        value={fastPeriod}
+                        onChange={(e) => setFastPeriod(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="backtest-slow-period">Slow Period</Label>
+                      <Input
+                        id="backtest-slow-period"
+                        type="number"
+                        value={slowPeriod}
+                        onChange={(e) => setSlowPeriod(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {strategy === 'rsi' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="backtest-rsi-period">Period</Label>
+                        <Input
+                          id="backtest-rsi-period"
+                          type="number"
+                          value={rsiPeriod}
+                          onChange={(e) => setRsiPeriod(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="backtest-rsi-oversold">Oversold</Label>
+                        <Input
+                          id="backtest-rsi-oversold"
+                          type="number"
+                          value={rsiOversold}
+                          onChange={(e) => setRsiOversold(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="backtest-rsi-overbought">Overbought</Label>
+                        <Input
+                          id="backtest-rsi-overbought"
+                          type="number"
+                          value={rsiOverbought}
+                          onChange={(e) => setRsiOverbought(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {strategy === 'macd' && (
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="backtest-macd-fast">Fast EMA</Label>
+                      <Input
+                        id="backtest-macd-fast"
+                        type="number"
+                        value={macdFast}
+                        onChange={(e) => setMacdFast(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="backtest-macd-slow">Slow EMA</Label>
+                      <Input
+                        id="backtest-macd-slow"
+                        type="number"
+                        value={macdSlow}
+                        onChange={(e) => setMacdSlow(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="backtest-macd-signal">Signal Period</Label>
+                      <Input
+                        id="backtest-macd-signal"
+                        type="number"
+                        value={macdSignal}
+                        onChange={(e) => setMacdSignal(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Button
+                className="w-full mt-4 bg-primary text-primary-foreground font-semibold"
+                size="lg"
+                onClick={handleRunBacktest}
+                disabled={running}
+              >
+                {running ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Running Simulation...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-5 w-5" />
+                    Execute Backtest
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* MAIN RESULTS DISPLAY */}
+          <div className="lg:col-span-8 space-y-6">
+            {!backtestResult && !running && (
+              <Card className="flex flex-col items-center justify-center p-16 text-center border-dashed border-2 bg-muted/5 h-[400px]">
+                <Activity className="h-12 w-12 text-muted-foreground/60 mb-4 animate-pulse" />
+                <h3 className="font-bold text-lg text-muted-foreground">Simulation Lab Standby</h3>
+                <p className="text-muted-foreground/80 max-w-sm text-sm mt-1">
+                  Adjust your parameters on the left and hit <strong>Execute Backtest</strong> to run an event-driven backtest.
+                </p>
+              </Card>
+            )}
+
+            {running && (
+              <Card className="flex flex-col items-center justify-center p-16 text-center bg-muted/5 h-[400px]">
+                <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+                <h3 className="font-bold text-lg text-primary">Running Backtest Engine</h3>
+                <p className="text-muted-foreground max-w-sm text-sm mt-1">
+                  Retrieving candles, calculating technical indicators, and executing simulated trades...
+                </p>
+              </Card>
+            )}
+
+            {backtestResult && (
+              <>
+                {/* METRICS GRID */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* P&L CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Net P&L (ROI %)
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div
+                        className={`text-2xl font-bold flex items-center gap-1 ${
+                          backtestResult.metrics.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
+                        }`}
+                      >
+                        {backtestResult.metrics.net_pnl >= 0 ? '+' : ''}
+                        ₹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
+                        <span className="text-xs font-semibold">
+                          ({backtestResult.metrics.roi_pct}%)
+                        </span>
+                      </div>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        {backtestResult.metrics.net_pnl >= 0 ? (
+                          <ArrowUpRight className="h-10 w-10 text-emerald-500" />
+                        ) : (
+                          <ArrowDownRight className="h-10 w-10 text-red-500" />
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* WIN RATE CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Win Rate
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-foreground">
+                        {backtestResult.metrics.win_rate_pct}%
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {backtestResult.metrics.winning_trades} /{' '}
+                        {backtestResult.metrics.total_trades} trades
+                      </p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <CheckCircle2 className="h-10 w-10 text-primary" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* DRAWDOWN CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Max Drawdown
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-red-500">
+                        {backtestResult.metrics.max_drawdown_pct}%
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Peak-to-trough risk</p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <TrendingUp className="h-10 w-10 text-red-500 rotate-180" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* PROFIT FACTOR CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Profit Factor
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-foreground">
+                        {backtestResult.metrics.profit_factor}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Gross Win / Gross Loss</p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <TrendingUp className="h-10 w-10 text-primary" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* CHARTS CONTAINER */}
+                <Card className="border border-border/80 shadow-md">
+                  <CardContent className="p-4 space-y-4">
+                    {/* Price Chart */}
+                    <div>
+                      <h3 className="text-sm font-bold text-muted-foreground mb-2">Price & Executions</h3>
+                      {mainPlot.data.length > 0 ? (
+                        <Plot
+                          data={mainPlot.data}
+                          layout={mainPlot.layout}
+                          config={{ displayModeBar: false, responsive: true }}
+                          useResizeHandler
+                          style={{ width: '100%', height: '380px' }}
+                        />
+                      ) : (
+                        <div className="h-[380px] flex items-center justify-center text-muted-foreground text-sm">
+                          Error loading price chart.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Secondary Indicator Chart if applicable */}
+                    {secondaryPlot && (
+                      <div className="border-t border-border/80 pt-4">
+                        <h3 className="text-sm font-bold text-muted-foreground mb-2">
+                          {backtestResult.strategy.toUpperCase()} Oscillator
+                        </h3>
+                        <Plot
+                          data={secondaryPlot.data}
+                          layout={secondaryPlot.layout}
+                          config={{ displayModeBar: false, responsive: true }}
+                          useResizeHandler
+                          style={{ width: '100%', height: '180px' }}
+                        />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* TRADES LOG TABLE */}
+                <Card className="border border-border/80 shadow-md">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-md font-bold flex items-center gap-2">
+                      <Info className="h-4.5 w-4.5 text-primary" /> Trades Log ({backtestResult.trades.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {backtestResult.trades.length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground text-sm">
+                        No trades executed in the backtest period.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                        <Table>
+                          <TableHeader className="bg-muted/30 sticky top-0 z-10">
+                            <TableRow>
+                              <TableHead className="w-12 text-center">ID</TableHead>
+                              <TableHead>Qty</TableHead>
+                              <TableHead>Entry Price</TableHead>
+                              <TableHead>Entry Time</TableHead>
+                              <TableHead>Exit Price</TableHead>
+                              <TableHead>Exit Time</TableHead>
+                              <TableHead className="text-right">Net P&L</TableHead>
+                              <TableHead>Reason</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {backtestResult.trades.map((t) => (
+                              <TableRow key={t.id} className="hover:bg-muted/20">
+                                <TableCell className="text-center font-semibold text-muted-foreground">
+                                  {t.id}
+                                </TableCell>
+                                <TableCell className="font-medium">{t.qty}</TableCell>
+                                <TableCell>₹{t.entry_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {t.entry_time}
+                                </TableCell>
+                                <TableCell>₹{t.exit_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {t.exit_time}
+                                </TableCell>
+                                <TableCell
+                                  className={`text-right font-bold ${
+                                    t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
+                                  }`}
+                                >
+                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN')}
+                                  <span className="text-[10px] block font-normal text-muted-foreground">
+                                    {t.pnl_pct}%
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="text-[10px] font-normal">
+                                    {t.exit_reason}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
