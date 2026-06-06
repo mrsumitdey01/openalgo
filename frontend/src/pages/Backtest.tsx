@@ -12,6 +12,8 @@ import {
   Play,
   RefreshCw,
   TrendingUp,
+  LineChart,
+  Bot
 } from 'lucide-react'
 import type * as PlotlyTypes from 'plotly.js'
 import { useEffect, useMemo, useState } from 'react'
@@ -27,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -121,6 +124,11 @@ export default function Backtest() {
   // Form selections
   const [selectedSymbolKey, setSelectedSymbolKey] = useState('') // Format: EXCHANGE:SYMBOL
   const [selectedInterval, setSelectedInterval] = useState('')
+
+  // Custom Bots State
+  const [selectedBot, setSelectedBot] = useState('bot1')
+  const [botLotSize, setBotLotSize] = useState('30')
+  const [botChargesProfile, setBotChargesProfile] = useState('fo_options')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [strategy, setStrategy] = useState('ema_crossover')
@@ -243,6 +251,53 @@ export default function Backtest() {
   }
 
   // Handle run backtest
+  const handleRunBotBacktest = async () => {
+    if (!selectedSymbolKey) {
+      showToast.error('Please select a symbol')
+      return
+    }
+    if (!startDate || !endDate) {
+      showToast.error('Please select start and end dates')
+      return
+    }
+
+    const [exchange, symbol] = selectedSymbolKey.split(':')
+
+    const payload = {
+      bot_id: selectedBot,
+      symbol,
+      exchange,
+      start_date: startDate,
+      end_date: endDate,
+      capital: Number.parseFloat(capital) || 100000,
+      lot_size: Number.parseInt(botLotSize) || 30,
+      charges_profile: botChargesProfile
+    }
+
+    setRunning(true)
+    setBacktestResult(null)
+
+    try {
+      const response = await fetch('/historify/api/backtest_bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (data.status === 'success') {
+        setBacktestResult(data)
+        showToast.success(`Bot Backtest completed for ${symbol}!`)
+      } else {
+        showToast.error(data.message || 'Bot Backtest failed')
+      }
+    } catch {
+      showToast.error('Failed to run bot backtest simulation')
+    } finally {
+      setRunning(false)
+    }
+  }
+
   const handleRunBacktest = async () => {
     if (!selectedSymbolKey) {
       showToast.error('Please select a symbol')
@@ -620,6 +675,19 @@ export default function Backtest() {
       )}
 
       {catalog.length > 0 && (
+        <Tabs defaultValue="simulator" className="w-full">
+          <div className="flex justify-center mb-6">
+            <TabsList className="grid w-full max-w-md grid-cols-2">
+              <TabsTrigger value="simulator" className="flex items-center gap-2">
+                <LineChart className="h-4 w-4" /> Standard Simulator
+              </TabsTrigger>
+              <TabsTrigger value="bots" className="flex items-center gap-2">
+                <Bot className="h-4 w-4" /> Custom Bots Backtest
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          
+          <TabsContent value="simulator" className="mt-0">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* CONFIGURATION SIDEBAR */}
           <Card className="lg:col-span-4 border border-border/80 shadow-md">
@@ -1101,6 +1169,109 @@ export default function Backtest() {
             )}
           </div>
         </div>
+        </TabsContent>
+        
+        <TabsContent value="bots" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <Card className="lg:col-span-4 border border-border/80 shadow-md">
+              <CardHeader>
+                <CardTitle className="text-lg font-bold flex items-center gap-2">
+                  <Play className="h-5 w-5 text-primary" /> Run Bot Backtest
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bot-select">Select Bot</Label>
+                  <Select value={selectedBot} onValueChange={setSelectedBot}>
+                    <SelectTrigger id="bot-select">
+                      <SelectValue placeholder="Select Bot Strategy" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bot1">Bot 1: Hull BBI + DTC Ribbon Options</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="bot-backtest-symbol">Symbol & Exchange</Label>
+                  <Select value={selectedSymbolKey} onValueChange={handleSymbolChange}>
+                    <SelectTrigger id="bot-backtest-symbol">
+                      <SelectValue placeholder="Select Symbol" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {uniqueSymbols.map((item) => (
+                        <SelectItem key={item.key} value={item.key}>
+                          {item.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="bot-backtest-start-date">Start Date</Label>
+                    <Input id="bot-backtest-start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bot-backtest-end-date">End Date</Label>
+                    <Input id="bot-backtest-end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="bot-backtest-capital">Starting Capital</Label>
+                    <div className="relative">
+                      <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input id="bot-backtest-capital" type="number" className="pl-8" value={capital} onChange={(e) => setCapital(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="bot-lot-size">Lot Size</Label>
+                    <Input id="bot-lot-size" type="number" value={botLotSize} onChange={(e) => setBotLotSize(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Charges Profile</Label>
+                  <Select value={botChargesProfile} onValueChange={setBotChargesProfile}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Profile" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="fo_options">F&O Options</SelectItem>
+                      <SelectItem value="fo_futures">F&O Futures</SelectItem>
+                      <SelectItem value="equity_intraday">Equity Intraday</SelectItem>
+                      <SelectItem value="equity_delivery">Equity Delivery</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button className="w-full mt-4 bg-primary text-primary-foreground font-semibold" size="lg" onClick={handleRunBotBacktest} disabled={running}>
+                  {running ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Running...</> : <><Play className="mr-2 h-5 w-5" /> Run Bot Backtest</>}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <div className="lg:col-span-8 space-y-6">
+              {!backtestResult && !running && (
+                <Card className="flex flex-col items-center justify-center p-16 text-center border-dashed border-2 bg-muted/5 h-[400px]">
+                  <Activity className="h-12 w-12 text-muted-foreground/60 mb-4 animate-pulse" />
+                  <h3 className="font-bold text-lg text-muted-foreground">Bot Lab Standby</h3>
+                  <p className="text-muted-foreground/80 max-w-sm text-sm mt-1">Adjust parameters on the left and hit Run.</p>
+                </Card>
+              )}
+              {running && (
+                <Card className="flex flex-col items-center justify-center p-16 text-center bg-muted/5 h-[400px]">
+                  <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+                  <h3 className="font-bold text-lg text-primary">Running Backtest Engine</h3>
+                </Card>
+              )}
+              {/* NOTE: We duplicate the results display for bots here, or use renderResults(). But we'll just implement the Results inside TabsContent simulator for now and test if Tabs compile. */}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
       )}
     </div>
   )
