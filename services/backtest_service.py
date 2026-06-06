@@ -399,3 +399,281 @@ def run_backtest(params: dict) -> tuple[bool, dict, int]:
     except Exception as e:
         logger.exception(f"Error in backtest execution: {e}")
         return False, {"status": "error", "message": f"Backtest failed: {str(e)}"}, 500
+
+def calculate_statutory_charges(profile, value, qty, side):
+    """
+    Calculates exact statutory charges for Indian markets based on the selected profile.
+    """
+    brokerage = 0.0
+    stt = 0.0
+    txn = 0.0
+    gst = 0.0
+    sebi = 0.0
+    stamp = 0.0
+
+    if profile == "fo_options":
+        brokerage = 20.0
+        stt = (value * 0.0015) if side == "SELL" else 0.0
+        txn = value * 0.0003553
+        sebi = value * 0.000001
+        stamp = (value * 0.00003) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
+    elif profile == "fo_futures":
+        brokerage = 20.0
+        stt = (value * 0.000125) if side == "SELL" else 0.0
+        txn = value * 0.000019
+        sebi = value * 0.000001
+        stamp = (value * 0.00002) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
+    elif profile == "equity_intraday":
+        brokerage = min(20.0, value * 0.0003)
+        stt = (value * 0.00025) if side == "SELL" else 0.0
+        txn = value * 0.0000325
+        sebi = value * 0.000001
+        stamp = (value * 0.00003) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
+    elif profile == "equity_delivery":
+        brokerage = 0.0
+        stt = value * 0.001
+        txn = value * 0.0000325
+        sebi = value * 0.000001
+        stamp = (value * 0.00015) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
+
+    total_fee = brokerage + stt + txn + gst + sebi + stamp
+    return total_fee, {
+        "brokerage": round(brokerage, 2),
+        "stt": round(stt, 2),
+        "txn": round(txn, 2),
+        "gst": round(gst, 2),
+        "sebi": round(sebi, 2),
+        "stamp": round(stamp, 2),
+        "total": round(total_fee, 2)
+    }
+
+def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
+    try:
+        from strategies.scripts.bot1_hull_dtc_ribbon import HullBBI, DTCRibbon, check_signals
+
+        symbol = params.get("symbol", "BANKNIFTY").strip().upper()
+        exchange = params.get("exchange", "NSE").strip().upper()
+        interval = "1m"
+        start_date_str = params.get("start_date")
+        end_date_str = params.get("end_date")
+        
+        capital = float(params.get("capital", 100000.0))
+        execution_mode = params.get("execution_mode", "options_spread")
+        
+        if execution_mode == "futures":
+            charges_profile = "fo_futures"
+        else:
+            charges_profile = "fo_options"
+            
+        lot_size = int(params.get("lot_size", 30))
+
+        start_ts = None
+        end_ts = None
+        if start_date_str:
+            start_ts = int(datetime.strptime(start_date_str, "%Y-%m-%d").timestamp())
+        if end_date_str:
+            end_ts = int(datetime.strptime(end_date_str, "%Y-%m-%d").replace(hour=23, minute=59, second=59).timestamp())
+
+        df = get_ohlcv(
+            symbol=symbol,
+            exchange=exchange,
+            interval=interval,
+            start_timestamp=start_ts,
+            end_timestamp=end_ts
+        )
+
+        if df.empty:
+            return False, {"status": "error", "message": f"No historical data found for {symbol} ({exchange})"}, 404
+
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        df["datetime"] = df["timestamp"].apply(lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S"))
+
+        hull = HullBBI(length=21)
+        df = hull.compute(df)
+        
+        dtc = DTCRibbon()
+        df = dtc.compute(df)
+
+        current_capital = capital
+        peak_capital = capital
+        max_drawdown = 0.0
+        
+        trades = []
+        open_position = None
+        capital_history = [capital] * len(df)
+
+        if execution_mode == "futures":
+            spread_delta = 1.0
+        elif execution_mode in ["options_buying", "options_selling"]:
+            spread_delta = 0.5
+        else:
+            spread_delta = 0.25
+
+        for i in range(2, len(df)):
+            row = df.loc[i]
+            price = row["close"]
+            dt_str = row["datetime"]
+            
+            slice_df = df.iloc[:i]
+            signal = check_signals(slice_df, open_position["type"] if open_position else None)
+
+            if open_position is not None:
+                spot_diff = price - open_position["entry_spot"]
+                if open_position["type"] == "LONG":
+                    current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
+                else:
+                    current_spread_val = open_position["entry_spread"] - (spot_diff * spread_delta)
+                
+                if signal in ["EXIT_LONG", "EXIT_SHORT"] or i == len(df) - 1:
+                    qty = open_position["qty"]
+                    exit_value = current_spread_val * qty
+
+                    exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
+                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty, exit_side)
+
+                    if open_position["type"] == "LONG":
+                        gross_pnl = (current_spread_val - open_position["entry_spread"]) * qty
+                    else:
+                        gross_pnl = (open_position["entry_spread"] - current_spread_val) * qty
+                        
+                    net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
+                    current_capital += (gross_pnl - exit_fee)
+                    
+                    pnl_pct = (net_pnl / (open_position["entry_spread"] * qty)) * 100.0 if qty > 0 else 0.0
+                    
+                    trades.append({
+                        "id": len(trades) + 1,
+                        "direction": open_position["type"],
+                        "qty": qty,
+                        "entry_time": open_position["datetime"],
+                        "entry_price": round(open_position["entry_spread"], 2),
+                        "entry_fee": round(open_position["entry_fee"], 2),
+                        "exit_time": dt_str,
+                        "exit_price": round(current_spread_val, 2),
+                        "exit_fee": round(exit_fee, 2),
+                        "gross_pnl": round(gross_pnl, 2),
+                        "net_pnl": round(net_pnl, 2),
+                        "pnl_pct": round(pnl_pct, 2),
+                        "exit_reason": "Bot Exit Signal" if signal else "End of Data",
+                        "fee_breakdown": fee_breakdown
+                    })
+                    open_position = None
+
+            elif signal in ["LONG", "SHORT"] and i < len(df) - 1:
+                if execution_mode == "futures":
+                    margin_required = price * 0.10
+                    entry_spread = price
+                elif execution_mode == "options_buying":
+                    margin_required = price * 0.01
+                    entry_spread = price * 0.01
+                elif execution_mode == "options_selling":
+                    margin_required = price * 0.10
+                    entry_spread = price * 0.01
+                else:
+                    margin_required = price * 0.005
+                    entry_spread = price * 0.005
+                    
+                available_capital = current_capital * 0.95
+                if available_capital > (margin_required * lot_size):
+                    lots = math.floor(available_capital / (margin_required * lot_size))
+                    qty = lots * lot_size
+                    entry_value = entry_spread * qty
+                    
+                    entry_side = "SELL" if signal == "SHORT" else "BUY"
+                    entry_fee, fee_breakdown = calculate_statutory_charges(charges_profile, entry_value, qty, entry_side)
+                    current_capital -= entry_fee
+                    
+                    open_position = {
+                        "type": signal,
+                        "entry_spot": price,
+                        "entry_spread": entry_spread,
+                        "qty": qty,
+                        "datetime": dt_str,
+                        "entry_fee": entry_fee
+                    }
+
+            effective_capital = current_capital
+            if open_position is not None:
+                spot_diff = price - open_position["entry_spot"]
+                if open_position["type"] == "LONG":
+                    current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
+                else:
+                    current_spread_val = open_position["entry_spread"] - (spot_diff * spread_delta)
+                effective_capital += (current_spread_val * open_position["qty"])
+            
+            capital_history[i] = effective_capital
+            if effective_capital > peak_capital:
+                peak_capital = effective_capital
+            
+            dd = ((peak_capital - effective_capital) / peak_capital) * 100.0 if peak_capital > 0 else 0.0
+            if dd > max_drawdown:
+                max_drawdown = dd
+
+        df["capital_curve"] = capital_history
+
+        total_trades = len(trades)
+        winning_trades = sum(1 for t in trades if t["net_pnl"] > 0)
+        losing_trades = sum(1 for t in trades if t["net_pnl"] <= 0)
+        win_rate = (winning_trades / total_trades * 100.0) if total_trades > 0 else 0.0
+        
+        gross_profits = sum(t["net_pnl"] for t in trades if t["net_pnl"] > 0)
+        gross_losses = sum(t["net_pnl"] for t in trades if t["net_pnl"] < 0)
+        
+        profit_factor = (gross_profits / abs(gross_losses)) if gross_losses != 0 else (gross_profits if gross_profits > 0 else 1.0)
+        net_pnl = sum(t["net_pnl"] for t in trades)
+        roi = (net_pnl / capital) * 100.0
+        avg_trade_pnl = (net_pnl / total_trades) if total_trades > 0 else 0.0
+
+        chart_df = df.copy()
+        if len(chart_df) > 2000:
+            step = len(chart_df) // 1000
+            chart_df = chart_df.iloc[::step].reset_index(drop=True)
+
+        chart_data = []
+        for _, r in chart_df.iterrows():
+            item = {
+                "timestamp": int(r["timestamp"]),
+                "datetime": r["datetime"],
+                "open": round(r["open"], 2),
+                "high": round(r["high"], 2),
+                "low": round(r["low"], 2),
+                "close": round(r["close"], 2),
+                "volume": int(r["volume"]),
+                "capital": round(r["capital_curve"], 2)
+            }
+            chart_data.append(item)
+
+        metrics = {
+            "initial_capital": round(capital, 2),
+            "final_capital": round(capital + net_pnl, 2),
+            "net_pnl": round(net_pnl, 2),
+            "roi_pct": round(roi, 2),
+            "total_trades": total_trades,
+            "win_rate_pct": round(win_rate, 2),
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "profit_factor": round(profit_factor, 2),
+            "max_drawdown_pct": round(max_drawdown, 2),
+            "avg_trade_pnl": round(avg_trade_pnl, 2)
+        }
+
+        response = {
+            "status": "success",
+            "symbol": symbol,
+            "exchange": exchange,
+            "interval": interval,
+            "strategy": "bot1_hull_dtc_ribbon",
+            "metrics": metrics,
+            "trades": trades,
+            "chart_data": chart_data
+        }
+        
+        return True, response, 200
+
+    except Exception as e:
+        logger.exception(f"Error in Bot 1 backtest execution: {e}")
+        return False, {"status": "error", "message": f"Backtest failed: {str(e)}"}, 500

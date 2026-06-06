@@ -63,25 +63,25 @@ def test_check_signals_logic():
     # Signals are checked against df.iloc[-2] (last completed candle)
     # Row 0 will be evaluated since len(df) == 2.
     
-    # Case 1: Long Entry (Close > HMA, HMA bullish, Close > Ribbon Max)
+    # Case 1: Long Entry (Close > HMA, HMA bullish, Ribbon Bullish)
     df_long = pd.DataFrame({
         "close": [100.0, 105.0],
         "hma": [90.0, 95.0],
         "hma_bullish": [True, True],
         "hma_bearish": [False, False],
-        "ribbon_max": [95.0, 98.0],
-        "ribbon_min": [85.0, 88.0]
+        "ribbon_bullish": [True, True],
+        "ribbon_bearish": [False, False]
     })
     assert check_signals(df_long, current_position=None) == "LONG"
     
-    # Case 2: Short Entry (Close < HMA, HMA bearish, Close < Ribbon Min)
+    # Case 2: Short Entry (Close < HMA, HMA bearish, Ribbon Bearish)
     df_short = pd.DataFrame({
         "close": [90.0, 85.0],
         "hma": [100.0, 95.0],
         "hma_bullish": [False, False],
         "hma_bearish": [True, True],
-        "ribbon_max": [105.0, 102.0],
-        "ribbon_min": [95.0, 92.0]
+        "ribbon_bullish": [False, False],
+        "ribbon_bearish": [True, True]
     })
     assert check_signals(df_short, current_position=None) == "SHORT"
     
@@ -92,8 +92,8 @@ def test_check_signals_logic():
         "hma": [100.0, 98.0],
         "hma_bullish": [False, False],
         "hma_bearish": [True, True],
-        "ribbon_max": [105.0, 102.0],
-        "ribbon_min": [95.0, 92.0]
+        "ribbon_bullish": [False, False],
+        "ribbon_bearish": [False, False]
     })
     assert check_signals(df_exit_long, current_position="LONG") == "EXIT_LONG"
     
@@ -104,8 +104,8 @@ def test_check_signals_logic():
         "hma": [100.0, 98.0],
         "hma_bullish": [False, False],
         "hma_bearish": [True, True],
-        "ribbon_max": [105.0, 102.0],
-        "ribbon_min": [95.0, 92.0]
+        "ribbon_bullish": [False, False],
+        "ribbon_bearish": [False, False]
     })
     assert check_signals(df_hold_long, current_position="LONG") is None
 

@@ -13,7 +13,8 @@ import {
   RefreshCw,
   TrendingUp,
   LineChart,
-  Bot
+  Bot,
+  Zap
 } from 'lucide-react'
 import type * as PlotlyTypes from 'plotly.js'
 import { useEffect, useMemo, useState } from 'react'
@@ -21,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -113,6 +115,13 @@ interface BacktestResponse {
   message?: string
 }
 
+
+async function fetchCSRFToken(): Promise<string> {
+  const response = await fetch('/auth/csrf-token', { credentials: 'include' })
+  const data = await response.json()
+  return data.csrf_token
+}
+
 export default function Backtest() {
   const { mode, appMode } = useThemeStore()
   const isDark = mode === 'dark' || appMode === 'analyzer'
@@ -128,7 +137,7 @@ export default function Backtest() {
   // Custom Bots State
   const [selectedBot, setSelectedBot] = useState('bot1')
   const [botLotSize, setBotLotSize] = useState('30')
-  const [botChargesProfile, setBotChargesProfile] = useState('fo_options')
+  const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [strategy, setStrategy] = useState('ema_crossover')
@@ -227,6 +236,207 @@ export default function Backtest() {
   }, [selectedSymbolKey, catalog])
 
   // Automatically update interval and dates when symbol changes
+  const renderResults = () => {
+    if (!backtestResult) return null;
+    return (
+<>
+                {/* METRICS GRID */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* P&L CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Net P&L (ROI %)
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div
+                        className={`text-2xl font-bold flex items-center gap-1 ${
+                          backtestResult.metrics.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
+                        }`}
+                      >
+                        {backtestResult.metrics.net_pnl >= 0 ? '+' : ''}
+                        ₹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
+                        <span className="text-xs font-semibold">
+                          ({backtestResult.metrics.roi_pct}%)
+                        </span>
+                      </div>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        {backtestResult.metrics.net_pnl >= 0 ? (
+                          <ArrowUpRight className="h-10 w-10 text-emerald-500" />
+                        ) : (
+                          <ArrowDownRight className="h-10 w-10 text-red-500" />
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* WIN RATE CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Win Rate
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-foreground">
+                        {backtestResult.metrics.win_rate_pct}%
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {backtestResult.metrics.winning_trades} /{' '}
+                        {backtestResult.metrics.total_trades} trades
+                      </p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <CheckCircle2 className="h-10 w-10 text-primary" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* DRAWDOWN CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Max Drawdown
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-red-500">
+                        {backtestResult.metrics.max_drawdown_pct}%
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Peak-to-trough risk</p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <TrendingUp className="h-10 w-10 text-red-500 rotate-180" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* PROFIT FACTOR CARD */}
+                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Profit Factor
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-extrabold text-foreground">
+                        {backtestResult.metrics.profit_factor}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">Gross Win / Gross Loss</p>
+                      <div className="absolute right-3 bottom-3 opacity-15">
+                        <TrendingUp className="h-10 w-10 text-primary" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* CHARTS CONTAINER */}
+                <Card className="border border-border/80 shadow-md">
+                  <CardContent className="p-4 space-y-4">
+                    {/* Price Chart */}
+                    <div>
+                      <h3 className="text-sm font-bold text-muted-foreground mb-2">Price & Executions</h3>
+                      {mainPlot.data.length > 0 ? (
+                        <Plot
+                          data={mainPlot.data}
+                          layout={mainPlot.layout}
+                          config={{ displayModeBar: false, responsive: true }}
+                          useResizeHandler
+                          style={{ width: '100%', height: '380px' }}
+                        />
+                      ) : (
+                        <div className="h-[380px] flex items-center justify-center text-muted-foreground text-sm">
+                          Error loading price chart.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Secondary Indicator Chart if applicable */}
+                    {secondaryPlot && (
+                      <div className="border-t border-border/80 pt-4">
+                        <h3 className="text-sm font-bold text-muted-foreground mb-2">
+                          {backtestResult.strategy.toUpperCase()} Oscillator
+                        </h3>
+                        <Plot
+                          data={secondaryPlot.data}
+                          layout={secondaryPlot.layout}
+                          config={{ displayModeBar: false, responsive: true }}
+                          useResizeHandler
+                          style={{ width: '100%', height: '180px' }}
+                        />
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* TRADES LOG TABLE */}
+                <Card className="border border-border/80 shadow-md">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-md font-bold flex items-center gap-2">
+                      <Info className="h-4.5 w-4.5 text-primary" /> Trades Log ({backtestResult.trades.length})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {backtestResult.trades.length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground text-sm">
+                        No trades executed in the backtest period.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
+                        <Table>
+                          <TableHeader className="bg-muted/30 sticky top-0 z-10">
+                            <TableRow>
+                              <TableHead className="w-12 text-center">ID</TableHead>
+                              <TableHead>Qty</TableHead>
+                              <TableHead>Entry Price</TableHead>
+                              <TableHead>Entry Time</TableHead>
+                              <TableHead>Exit Price</TableHead>
+                              <TableHead>Exit Time</TableHead>
+                              <TableHead className="text-right">Net P&L</TableHead>
+                              <TableHead>Reason</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {backtestResult.trades.map((t) => (
+                              <TableRow key={t.id} className="hover:bg-muted/20">
+                                <TableCell className="text-center font-semibold text-muted-foreground">
+                                  {t.id}
+                                </TableCell>
+                                <TableCell className="font-medium">{t.qty}</TableCell>
+                                <TableCell>₹{t.entry_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {t.entry_time}
+                                </TableCell>
+                                <TableCell>₹{t.exit_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell className="text-xs text-muted-foreground">
+                                  {t.exit_time}
+                                </TableCell>
+                                <TableCell
+                                  className={`text-right font-bold ${
+                                    t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
+                                  }`}
+                                >
+                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN')}
+                                  <span className="text-[10px] block font-normal text-muted-foreground">
+                                    {t.pnl_pct}%
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className="text-[10px] font-normal">
+                                    {t.exit_reason}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </>
+    );
+  };
+
   const handleSymbolChange = (key: string) => {
     setSelectedSymbolKey(key)
     const [exchange, symbol] = key.split(':')
@@ -247,6 +457,12 @@ export default function Backtest() {
         const maxTs = Math.max(...lastTimestamps)
         setEndDate(new Date(maxTs * 1000).toISOString().split('T')[0])
       }
+    }
+    
+    if (symbol.includes('BANKNIFTY')) {
+      setBotLotSize('30')
+    } else if (symbol.includes('NIFTY')) {
+      setBotLotSize('65')
     }
   }
 
@@ -271,16 +487,17 @@ export default function Backtest() {
       end_date: endDate,
       capital: Number.parseFloat(capital) || 100000,
       lot_size: Number.parseInt(botLotSize) || 30,
-      charges_profile: botChargesProfile
+      execution_mode: botExecutionMode
     }
 
     setRunning(true)
     setBacktestResult(null)
 
     try {
+      const csrfToken = await fetchCSRFToken()
       const response = await fetch('/historify/api/backtest_bot', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         body: JSON.stringify(payload),
         credentials: 'include',
       })
@@ -347,9 +564,10 @@ export default function Backtest() {
     setBacktestResult(null)
 
     try {
+      const csrfToken = await fetchCSRFToken()
       const response = await fetch('/historify/api/backtest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
         body: JSON.stringify(payload),
         credentials: 'include',
       })
@@ -674,18 +892,17 @@ export default function Backtest() {
         </Card>
       )}
 
-      {catalog.length > 0 && (
-        <Tabs defaultValue="simulator" className="w-full">
-          <div className="flex justify-center mb-6">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="simulator" className="flex items-center gap-2">
-                <LineChart className="h-4 w-4" /> Standard Simulator
-              </TabsTrigger>
-              <TabsTrigger value="bots" className="flex items-center gap-2">
-                <Bot className="h-4 w-4" /> Custom Bots Backtest
-              </TabsTrigger>
-            </TabsList>
-          </div>
+      <Tabs defaultValue="simulator" className="w-full">
+        <div className="flex justify-center mb-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="simulator" className="flex items-center gap-2">
+              <LineChart className="h-4 w-4" /> Standard Simulator
+            </TabsTrigger>
+            <TabsTrigger value="bots" className="flex items-center gap-2">
+              <Bot className="h-4 w-4" /> Custom Bots Backtest
+            </TabsTrigger>
+          </TabsList>
+        </div>
           
           <TabsContent value="simulator" className="mt-0">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -970,208 +1187,80 @@ export default function Backtest() {
               </Card>
             )}
 
-            {backtestResult && (
-              <>
-                {/* METRICS GRID */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {/* P&L CARD */}
-                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Net P&L (ROI %)
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      <div
-                        className={`text-2xl font-bold flex items-center gap-1 ${
-                          backtestResult.metrics.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
-                        }`}
-                      >
-                        {backtestResult.metrics.net_pnl >= 0 ? '+' : ''}
-                        ₹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
-                        <span className="text-xs font-semibold">
-                          ({backtestResult.metrics.roi_pct}%)
-                        </span>
-                      </div>
-                      <div className="absolute right-3 bottom-3 opacity-15">
-                        {backtestResult.metrics.net_pnl >= 0 ? (
-                          <ArrowUpRight className="h-10 w-10 text-emerald-500" />
-                        ) : (
-                          <ArrowDownRight className="h-10 w-10 text-red-500" />
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* WIN RATE CARD */}
-                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Win Rate
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-extrabold text-foreground">
-                        {backtestResult.metrics.win_rate_pct}%
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {backtestResult.metrics.winning_trades} /{' '}
-                        {backtestResult.metrics.total_trades} trades
-                      </p>
-                      <div className="absolute right-3 bottom-3 opacity-15">
-                        <CheckCircle2 className="h-10 w-10 text-primary" />
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* DRAWDOWN CARD */}
-                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Max Drawdown
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-extrabold text-red-500">
-                        {backtestResult.metrics.max_drawdown_pct}%
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">Peak-to-trough risk</p>
-                      <div className="absolute right-3 bottom-3 opacity-15">
-                        <TrendingUp className="h-10 w-10 text-red-500 rotate-180" />
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* PROFIT FACTOR CARD */}
-                  <Card className="relative overflow-hidden border border-border/70 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Profit Factor
-                      </p>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-extrabold text-foreground">
-                        {backtestResult.metrics.profit_factor}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">Gross Win / Gross Loss</p>
-                      <div className="absolute right-3 bottom-3 opacity-15">
-                        <TrendingUp className="h-10 w-10 text-primary" />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* CHARTS CONTAINER */}
-                <Card className="border border-border/80 shadow-md">
-                  <CardContent className="p-4 space-y-4">
-                    {/* Price Chart */}
-                    <div>
-                      <h3 className="text-sm font-bold text-muted-foreground mb-2">Price & Executions</h3>
-                      {mainPlot.data.length > 0 ? (
-                        <Plot
-                          data={mainPlot.data}
-                          layout={mainPlot.layout}
-                          config={{ displayModeBar: false, responsive: true }}
-                          useResizeHandler
-                          style={{ width: '100%', height: '380px' }}
-                        />
-                      ) : (
-                        <div className="h-[380px] flex items-center justify-center text-muted-foreground text-sm">
-                          Error loading price chart.
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Secondary Indicator Chart if applicable */}
-                    {secondaryPlot && (
-                      <div className="border-t border-border/80 pt-4">
-                        <h3 className="text-sm font-bold text-muted-foreground mb-2">
-                          {backtestResult.strategy.toUpperCase()} Oscillator
-                        </h3>
-                        <Plot
-                          data={secondaryPlot.data}
-                          layout={secondaryPlot.layout}
-                          config={{ displayModeBar: false, responsive: true }}
-                          useResizeHandler
-                          style={{ width: '100%', height: '180px' }}
-                        />
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* TRADES LOG TABLE */}
-                <Card className="border border-border/80 shadow-md">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-md font-bold flex items-center gap-2">
-                      <Info className="h-4.5 w-4.5 text-primary" /> Trades Log ({backtestResult.trades.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    {backtestResult.trades.length === 0 ? (
-                      <div className="py-8 text-center text-muted-foreground text-sm">
-                        No trades executed in the backtest period.
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto max-h-[300px] overflow-y-auto">
-                        <Table>
-                          <TableHeader className="bg-muted/30 sticky top-0 z-10">
-                            <TableRow>
-                              <TableHead className="w-12 text-center">ID</TableHead>
-                              <TableHead>Qty</TableHead>
-                              <TableHead>Entry Price</TableHead>
-                              <TableHead>Entry Time</TableHead>
-                              <TableHead>Exit Price</TableHead>
-                              <TableHead>Exit Time</TableHead>
-                              <TableHead className="text-right">Net P&L</TableHead>
-                              <TableHead>Reason</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {backtestResult.trades.map((t) => (
-                              <TableRow key={t.id} className="hover:bg-muted/20">
-                                <TableCell className="text-center font-semibold text-muted-foreground">
-                                  {t.id}
-                                </TableCell>
-                                <TableCell className="font-medium">{t.qty}</TableCell>
-                                <TableCell>₹{t.entry_price.toLocaleString('en-IN')}</TableCell>
-                                <TableCell className="text-xs text-muted-foreground">
-                                  {t.entry_time}
-                                </TableCell>
-                                <TableCell>₹{t.exit_price.toLocaleString('en-IN')}</TableCell>
-                                <TableCell className="text-xs text-muted-foreground">
-                                  {t.exit_time}
-                                </TableCell>
-                                <TableCell
-                                  className={`text-right font-bold ${
-                                    t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
-                                  }`}
-                                >
-                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN')}
-                                  <span className="text-[10px] block font-normal text-muted-foreground">
-                                    {t.pnl_pct}%
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline" className="text-[10px] font-normal">
-                                    {t.exit_reason}
-                                  </Badge>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </>
-            )}
+            {renderResults()}
           </div>
         </div>
         </TabsContent>
         
         <TabsContent value="bots" className="mt-0">
+
+          <div className="mb-6">
+            {selectedBot === 'bot1' && (
+              <div className="space-y-4">
+                <Alert className="bg-primary/5 border-primary/20">
+                  <Info className="h-5 w-5 text-primary" />
+                  <AlertTitle className="text-primary font-bold text-lg">Bot 1: Hull BBI + DTC Ribbon Options Spread</AlertTitle>
+                  <AlertDescription className="mt-2 text-sm text-muted-foreground">
+                    A high-frequency trend-following engine combining the Hull Bull-Bear Indicator (BBI) and Dynamic Trend Channel (DTC) Volatility Ribbons. 
+                    Unlike simple naked buying, this bot executes risk-defined <strong>Options Spreads</strong> (Bull Call & Bear Put Spreads) dynamically chosen at the nearest expiry.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card className="border border-border/60 shadow-sm bg-background/50">
+                    <CardHeader className="pb-2 border-b border-border/30">
+                      <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4 text-emerald-500" /> How It Runs</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-3 text-sm text-muted-foreground space-y-2">
+                      <p><strong>Tick-by-Tick Engine:</strong> In live mode, it operates as a background daemon capturing tick data continuously. It evaluates conditions strictly on the <strong>1-Minute Candle Close</strong> to prevent false intra-candle noise breakouts.</p>
+                      <p><strong>Spread Selection:</strong> Resolves the precise ATM and OTM strikes autonomously by pinging the broker API for real-time nearest expiry data.</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border border-border/60 shadow-sm bg-background/50">
+                    <CardHeader className="pb-2 border-b border-border/30">
+                      <CardTitle className="text-base flex items-center gap-2"><TrendingUp className="h-4 w-4 text-primary" /> Signal Logic</CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-3 text-sm text-muted-foreground">
+                      <ul className="list-disc list-outside ml-4 space-y-1.5">
+                        <li><strong>Long Entry:</strong> Price closes ABOVE Hull BBI, BBI slope turns Blue, and price breaks ABOVE the DTC Max Ribbon. 
+                          <span className="font-semibold text-primary block mt-1">
+                            Action: {botExecutionMode === 'options_spread' && 'Buy Bull Call Spread'}
+                                   {botExecutionMode === 'options_buying' && 'Buy ATM Call Option'}
+                                   {botExecutionMode === 'options_selling' && 'Sell ATM Put Option'}
+                                   {botExecutionMode === 'futures' && 'Go Long Future'}
+                          </span>
+                        </li>
+                        <li><strong>Short Entry:</strong> Price closes BELOW Hull BBI, BBI slope turns Red, and price breaks BELOW the DTC Min Ribbon.
+                          <span className="font-semibold text-primary block mt-1">
+                            Action: {botExecutionMode === 'options_spread' && 'Buy Bear Put Spread'}
+                                   {botExecutionMode === 'options_buying' && 'Buy ATM Put Option'}
+                                   {botExecutionMode === 'options_selling' && 'Sell ATM Call Option'}
+                                   {botExecutionMode === 'futures' && 'Go Short Future'}
+                          </span>
+                        </li>
+                        <li><strong>Exit Strategy:</strong> Exits on structural stop (candle close BELOW BBI for Longs, ABOVE BBI for Shorts) or if an opposing trend change is detected. Hard Square-off executes before market close.</li>
+                      </ul>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <Card className="border border-border/60 shadow-sm bg-background/50">
+                  <CardHeader className="pb-2 border-b border-border/30">
+                    <CardTitle className="text-base flex items-center gap-2"><Zap className="h-4 w-4 text-amber-500" /> Smart Order Execution & Chasing Algorithm</CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-3 text-sm text-muted-foreground space-y-3">
+                    <p>Options spreads require two simultaneous executions. The bot uses a <strong>Place-and-Chase</strong> algorithm to combat slippage and liquidity gaps:</p>
+                    <ul className="list-decimal list-outside ml-4 space-y-2">
+                      <li><strong>Dynamic Limit Ordering:</strong> Captures the Last Traded Price (LTP) via WebSocket and places strict Limit orders (avoiding dangerous Market orders on illiquid strikes).</li>
+                      <li><strong>Order Chasing:</strong> If the order remains unfilled after a timeout loop (due to sudden volatility), it automatically cancels, fetches the fresh LTP, and re-places the limit order—"chasing" the price up to a defined slippage tolerance.</li>
+                      <li><strong>Leg Reconciliation (Emergency Unwind):</strong> If the BUY leg fills but the SELL leg continuously fails (e.g. hitting circuit limits or extreme illiquidity), the bot prevents naked exposure by initiating an <em>Emergency Unwind</em>, immediately firing a closing market/limit order to reverse the filled BUY leg.</li>
+                    </ul>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             <Card className="lg:col-span-4 border border-border/80 shadow-md">
               <CardHeader>
@@ -1228,21 +1317,33 @@ export default function Backtest() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="bot-lot-size">Lot Size</Label>
-                    <Input id="bot-lot-size" type="number" value={botLotSize} onChange={(e) => setBotLotSize(e.target.value)} />
+                    <Select value={botLotSize} onValueChange={setBotLotSize}>
+                      <SelectTrigger id="bot-lot-size">
+                        <SelectValue placeholder="Select Lot Size" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="30">30 (BankNifty)</SelectItem>
+                        <SelectItem value="65">65 (Nifty)</SelectItem>
+                        <SelectItem value="15">15 (BankNifty Old)</SelectItem>
+                        <SelectItem value="25">25 (Nifty Old)</SelectItem>
+                        <SelectItem value="75">75 (Nifty Older)</SelectItem>
+                        <SelectItem value="1">1 (Crypto/Stocks)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Charges Profile</Label>
-                  <Select value={botChargesProfile} onValueChange={setBotChargesProfile}>
+                  <Label>Execution Mode</Label>
+                  <Select value={botExecutionMode} onValueChange={setBotExecutionMode}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select Profile" />
+                      <SelectValue placeholder="Select Mode" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="fo_options">F&O Options</SelectItem>
-                      <SelectItem value="fo_futures">F&O Futures</SelectItem>
-                      <SelectItem value="equity_intraday">Equity Intraday</SelectItem>
-                      <SelectItem value="equity_delivery">Equity Delivery</SelectItem>
+                      <SelectItem value="options_spread">Options Spread</SelectItem>
+                      <SelectItem value="options_buying">Options Buying (Naked)</SelectItem>
+                      <SelectItem value="options_selling">Options Selling (Naked)</SelectItem>
+                      <SelectItem value="futures">Futures</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1267,12 +1368,11 @@ export default function Backtest() {
                   <h3 className="font-bold text-lg text-primary">Running Backtest Engine</h3>
                 </Card>
               )}
-              {/* NOTE: We duplicate the results display for bots here, or use renderResults(). But we'll just implement the Results inside TabsContent simulator for now and test if Tabs compile. */}
+              {renderResults()}
             </div>
           </div>
         </TabsContent>
       </Tabs>
-      )}
     </div>
   )
 }

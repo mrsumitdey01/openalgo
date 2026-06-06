@@ -44,7 +44,7 @@ OPTION_EXCHANGE = os.getenv("OPTION_EXCHANGE", "NFO")
 def _get_default_param(param_name, underlying):
     if param_name == "LOT_SIZE":
         if underlying == "NIFTY":
-            return 25
+            return 65
         elif underlying == "BANKNIFTY":
             return 30
         elif underlying == "FINNIFTY":
@@ -169,32 +169,38 @@ def check_signals(df: pd.DataFrame, current_position=None):
 
     last = get_last_completed_candle(df)
     
-    if pd.isna(last.get("hma")) or pd.isna(last.get("ribbon_max")):
+    if pd.isna(last.get("hma")):
         return None
 
     close = float(last["close"])
     hma = float(last["hma"])
     hma_bullish = bool(last["hma_bullish"])
     hma_bearish = bool(last["hma_bearish"])
-    ribbon_max = float(last["ribbon_max"])
-    ribbon_min = float(last["ribbon_min"])
+    ribbon_bullish = bool(last.get("ribbon_bullish", False))
+    ribbon_bearish = bool(last.get("ribbon_bearish", False))
+    ribbon_max = float(last.get("ribbon_max", 0))
+    ribbon_min = float(last.get("ribbon_min", 0))
+
+    is_long_cond = (close > hma) and hma_bullish and (close > ribbon_max)
+    is_short_cond = (close < hma) and hma_bearish and (close < ribbon_min)
 
     if current_position == "LONG":
-        # Exit if Hull bear trend and close drops below HMA (5pt buffer)
-        if hma_bearish and close < (hma - 5.0):
+        # Exit if reverse signal OR basic Hull bear
+        if is_short_cond:
+            return "EXIT_LONG"
+        elif hma_bearish and (close < hma - 5.0):
             return "EXIT_LONG"
             
     elif current_position == "SHORT":
-        # Exit if Hull bull trend and close climbs above HMA (5pt buffer)
-        if hma_bullish and close > (hma + 5.0):
+        if is_long_cond:
+            return "EXIT_SHORT"
+        elif hma_bullish and (close > hma + 5.0):
             return "EXIT_SHORT"
             
     elif current_position is None:
-        # Long entry: close above HMA, HMA rising, close above DTC Ribbon max
-        if close > hma and hma_bullish and close > ribbon_max:
+        if is_long_cond:
             return "LONG"
-        # Short entry: close below HMA, HMA falling, close below DTC Ribbon min
-        if close < hma and hma_bearish and close < ribbon_min:
+        if is_short_cond:
             return "SHORT"
 
     return None

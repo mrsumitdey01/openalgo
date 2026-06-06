@@ -42,6 +42,7 @@ export const navItems: NavItem[] = [
   { href: '/logs', label: 'Logs', icon: FileBarChart },
   { href: '/tools', label: 'Tools', icon: Wrench },
   { href: '/backtest', label: 'Backtest', icon: BarChart3 },
+  { href: '/historify', label: 'Historify', icon: Database },
 ]
 
 // Items shown in mobile bottom navigation
