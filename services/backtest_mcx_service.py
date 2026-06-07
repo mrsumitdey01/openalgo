@@ -435,7 +435,7 @@ def calculate_statutory_charges(profile, value, qty, side):
     elif profile == "mcx_futures":
         brokerage = min(20.0, value * 0.0003)
         stt = (value * 0.0001) if side == "SELL" else 0.0
-        txn = value * 0.000026
+        txn = value * 0.000021
         sebi = value * 0.000001
         stamp = (value * 0.00002) if side == "BUY" else 0.0
         gst = (brokerage + sebi + txn) * 0.18
