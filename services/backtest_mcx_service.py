@@ -451,9 +451,9 @@ def calculate_statutory_charges(profile, value, qty, side):
         "total": round(total_fee, 2)
     }
 
-def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
+def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
     try:
-        from strategies.scripts.bot1_hull_dtc_ribbon import HullBBI, DTCRibbon, check_signals
+        from strategies.scripts.bot1_mcx_hull_dtc import HullBBI, DTCRibbon, check_signals
         from datetime import time as time_obj
 
         symbol = params.get("symbol", "BANKNIFTY").strip().upper()
@@ -481,7 +481,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
 
         df = get_ohlcv(
             symbol=symbol,
-            exchange=exchange,
+            exchange="MCX_INDEX" if exchange == "MCX" else exchange,
             interval=interval,
             start_timestamp=start_ts,
             end_timestamp=end_ts
@@ -500,9 +500,9 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
         df = dtc.compute(df)
 
         # ── Trading session constants (matching live bot) ──
-        ENTRY_START = time_obj(9, 30)
-        NO_NEW_ENTRIES = time_obj(14, 45)
-        HARD_SQUARE_OFF = time_obj(15, 15)
+        ENTRY_START = time_obj(10, 0)
+        NO_NEW_ENTRIES = time_obj(22, 0)
+        HARD_SQUARE_OFF = time_obj(22, 30)
 
         # Spread delta converts spot movement to profile-specific PnL
         if execution_mode == "futures":
@@ -776,7 +776,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
             "symbol": symbol,
             "exchange": exchange,
             "interval": interval,
-            "strategy": "bot1_hull_dtc_ribbon",
+            "strategy": "bot1_mcx_hull_dtc",
             "metrics": metrics,
             "trades": trades,
             "chart_data": chart_data

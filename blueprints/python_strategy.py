@@ -509,6 +509,7 @@ def start_strategy_process(strategy_id):
             strategy_env["OPENALGO_STRATEGY_EXCHANGE"] = normalize_exchange(
                 config.get("exchange")
             )
+            strategy_env["EXECUTION_MODE"] = config.get("execution_mode", "options_spread")
             strategy_env.setdefault("OPENALGO_HOST", "http://127.0.0.1:5000")
             try:
                 from database.auth_db import get_api_key_for_tradingview

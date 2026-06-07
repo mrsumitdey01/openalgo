@@ -161,6 +161,7 @@ export default function Backtest() {
   // Execution state
   const [running, setRunning] = useState(false)
   const [backtestResult, setBacktestResult] = useState<BacktestResponse | null>(null)
+  const [visibleTradesLimit, setVisibleTradesLimit] = useState(1000)
 
   // Load catalog on mount
   useEffect(() => {
@@ -396,7 +397,7 @@ export default function Backtest() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {backtestResult.trades.map((t) => (
+                            {backtestResult.trades.slice(0, visibleTradesLimit).map((t: any) => (
                               <TableRow key={t.id} className="hover:bg-muted/20">
                                 <TableCell className="text-center font-semibold text-muted-foreground">
                                   {t.id}
@@ -429,6 +430,20 @@ export default function Backtest() {
                             ))}
                           </TableBody>
                         </Table>
+                        {backtestResult.trades.length > visibleTradesLimit && (
+                          <div className="py-4 text-center border-t bg-muted/5 flex flex-col items-center justify-center space-y-2">
+                            <span className="text-xs text-muted-foreground">
+                              Showing first {visibleTradesLimit} of {backtestResult.trades.length} trades.
+                            </span>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => setVisibleTradesLimit(prev => prev + 1000)}
+                            >
+                              Load Next 1000 Trades
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </CardContent>
@@ -492,6 +507,7 @@ export default function Backtest() {
 
     setRunning(true)
     setBacktestResult(null)
+    setVisibleTradesLimit(1000)
 
     try {
       const csrfToken = await fetchCSRFToken()
@@ -562,6 +578,7 @@ export default function Backtest() {
 
     setRunning(true)
     setBacktestResult(null)
+    setVisibleTradesLimit(1000)
 
     try {
       const csrfToken = await fetchCSRFToken()
