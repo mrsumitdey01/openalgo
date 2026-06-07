@@ -425,6 +425,20 @@ def calculate_statutory_charges(profile, value, qty, side):
         sebi = value * 0.000001
         stamp = (value * 0.00002) if side == "BUY" else 0.0
         gst = (brokerage + sebi + txn) * 0.18
+    elif profile == "mcx_options":
+        brokerage = 20.0
+        stt = (value * 0.0005) if side == "SELL" else 0.0
+        txn = value * 0.000418
+        sebi = value * 0.000001
+        stamp = (value * 0.00003) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
+    elif profile == "mcx_futures":
+        brokerage = min(20.0, value * 0.0003)
+        stt = (value * 0.0001) if side == "SELL" else 0.0
+        txn = value * 0.000026
+        sebi = value * 0.000001
+        stamp = (value * 0.00002) if side == "BUY" else 0.0
+        gst = (brokerage + sebi + txn) * 0.18
     elif profile == "equity_intraday":
         brokerage = min(20.0, value * 0.0003)
         stt = (value * 0.00025) if side == "SELL" else 0.0
@@ -466,9 +480,9 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
         execution_mode = params.get("execution_mode", "options_spread")
         
         if execution_mode == "futures":
-            charges_profile = "fo_futures"
+            charges_profile = "mcx_futures"
         else:
-            charges_profile = "fo_options"
+            charges_profile = "mcx_options"
             
         lot_size = int(params.get("lot_size", 30))  # Fixed qty per trade
 
