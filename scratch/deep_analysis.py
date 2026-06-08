@@ -1,96 +1,93 @@
 import sys
-import json
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
+
 sys.path.append('.')
-from database.historify_db import get_ohlcv
 from services.backtest_service import run_bot1_backtest
 from services.backtest_mcx_service import run_bot1_mcx_backtest
 
-PROFILES = ["options_spread", "options_buying", "options_selling", "futures"]
-YEAR = "2025"
-CAPITAL = 20000000.0
-LOT_SIZE = 1
+logging.basicConfig(level=logging.INFO)
 
-def analyze_trades(trades, df, profile_name, symbol):
-    anomalies = []
-    for t in trades:
-        if t["qty"] != LOT_SIZE:
-            anomalies.append(f"Trade {t['id']}: Qty {t['qty']} != {LOT_SIZE}")
-        
-        try:
-            entry_time = datetime.strptime(t["entry_time"], "%Y-%m-%d %H:%M:%S").time()
-            exit_time = datetime.strptime(t["exit_time"], "%Y-%m-%d %H:%M:%S").time()
-        except:
-            continue
-
-        if symbol == "BANKNIFTY":
-            from datetime import time
-            if not (time(9, 30) <= entry_time <= time(14, 45)):
-                anomalies.append(f"Trade {t['id']}: Entry out of bounds {entry_time}")
-            if exit_time > time(15, 15):
-                anomalies.append(f"Trade {t['id']}: Exit after square off {exit_time}")
-        elif symbol == "CRUDEOIL" or symbol == "GOLDM":
-            from datetime import time
-            if not (time(10, 0) <= entry_time <= time(22, 0)):
-                anomalies.append(f"Trade {t['id']}: Entry out of bounds {entry_time}")
-            if exit_time > time(22, 30):
-                anomalies.append(f"Trade {t['id']}: Exit after square off {exit_time}")
-
-    return len(anomalies)
-
-def print_row(symbol, profile, trades, net_pnl, roi, anomalies):
-    print(f"{symbol:<12} | {profile:<16} | Trades: {trades:<5} | Net PnL: {net_pnl:>12.2f} | ROI: {roi:>6.2f}% | Time/Qty Anomalies: {anomalies}")
-
-def main():
-    print(f"--- 1-Year Backtest Summary ({YEAR}) | Capital: {CAPITAL} | Lot Size: {LOT_SIZE} ---")
-    print("-" * 110)
+# Run a programmatic backtest
+def run_and_verify(exchange, symbol, execution_mode, start_date, end_date):
+    print(f"\n{'='*80}")
+    print(f"ANALYZING: {exchange} | {symbol} | {execution_mode} | {start_date} to {end_date}")
+    print(f"{'='*80}")
     
-    for profile in PROFILES:
-        params = {
-            "symbol": "BANKNIFTY",
-            "exchange": "NSE_INDEX",
-            "start_date": f"{YEAR}-01-01",
-            "end_date": f"{YEAR}-12-31",
-            "capital": CAPITAL,
-            "execution_mode": profile,
-            "lot_size": LOT_SIZE
-        }
-        success, response, code = run_bot1_backtest(params)
-        if success:
-            df = get_ohlcv("BANKNIFTY", "NSE_INDEX", "1m", 
-                           int(datetime.strptime(f"{YEAR}-01-01", "%Y-%m-%d").timestamp()), 
-                           int(datetime.strptime(f"{YEAR}-12-31 23:59:59", "%Y-%m-%d %H:%M:%S").timestamp()))
-            anomalies = analyze_trades(response["trades"], df, profile, "BANKNIFTY")
-            metrics = response["metrics"]
-            print_row("BANKNIFTY", profile, metrics["total_trades"], metrics["net_pnl"], metrics["roi_pct"], anomalies)
-        else:
-            print(f"BANKNIFTY {profile} FAILED: {response}")
-
-    print("-" * 110)
-
-    for profile in PROFILES:
-        params = {
-            "symbol": "CRUDEOIL",
-            "exchange": "MCX_INDEX",
-            "start_date": f"{YEAR}-01-01",
-            "end_date": f"{YEAR}-12-31",
-            "capital": CAPITAL,
-            "execution_mode": profile,
-            "lot_size": LOT_SIZE
-        }
-        success, response, code = run_bot1_mcx_backtest(params)
-        if success:
-            df = get_ohlcv("CRUDEOIL", "MCX_INDEX", "1m", 
-                           int(datetime.strptime(f"{YEAR}-01-01", "%Y-%m-%d").timestamp()), 
-                           int(datetime.strptime(f"{YEAR}-12-31 23:59:59", "%Y-%m-%d %H:%M:%S").timestamp()))
-            anomalies = analyze_trades(response["trades"], df, profile, "CRUDEOIL")
-            metrics = response["metrics"]
-            print_row("CRUDEOIL", profile, metrics["total_trades"], metrics["net_pnl"], metrics["roi_pct"], anomalies)
-        else:
-            print(f"CRUDEOIL {profile} FAILED: {response}")
+    params = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "start_date": start_date,
+        "end_date": end_date,
+        "capital": 100000,
+        "execution_mode": execution_mode,
+        "lot_size": 1 if exchange == "MCX" else 30
+    }
+    
+    if exchange == "MCX":
+        success, result, status_code = run_bot1_mcx_backtest(params)
+    else:
+        success, result, status_code = run_bot1_backtest(params)
+        
+    if not success or status_code != 200:
+        print(f"Failed to run backtest: {result}")
+        return
+        
+    trades = result.get("trades", [])
+    print(f"Total Trades Executed: {len(trades)}")
+    
+    if not trades:
+        print("No trades found.")
+        return
+        
+    # Analyze trades
+    eod_exits = 0
+    pnl_stop_exits = 0
+    structural_stop_exits = 0
+    signal_exits = 0
+    anomalies = []
+    
+    for t in trades:
+        reason = t.get("exit_reason", "")
+        if "EOD" in reason: eod_exits += 1
+        elif "PnL" in reason: pnl_stop_exits += 1
+        elif "Structural" in reason: structural_stop_exits += 1
+        elif "Signal" in reason: signal_exits += 1
+        
+        # Verify net PnL math
+        gross = t["gross_pnl"]
+        fees = t["entry_fee"] + t["exit_fee"]
+        net = t["net_pnl"]
+        
+        if abs((gross - fees) - net) > 0.05:
+            anomalies.append(f"Trade {t['id']}: Math mismatch. Gross {gross} - Fees {fees} != Net {net}")
             
-    print("-" * 110)
+    print(f"\nExit Reasons Breakdown:")
+    print(f"  EOD Square-Off : {eod_exits}")
+    print(f"  15% PnL Stop   : {pnl_stop_exits}")
+    print(f"  Structural Stop: {structural_stop_exits}")
+    print(f"  Signal Exit    : {signal_exits}")
+    
+    if anomalies:
+        print("\nANOMALIES DETECTED:")
+        for a in anomalies:
+            print(f"  - {a}")
+    else:
+        print("\nAll trades passed internal math verification.")
+        
+    # Sample 3 random trades to display full trace
+    import random
+    sample_size = min(3, len(trades))
+    samples = random.sample(trades, sample_size)
+    print("\nSAMPLE TRADES (Full Trace):")
+    for t in samples:
+        print(f"  Trade {t['id']}: {t['direction']} | Entry: {t['entry_time']} @ {t['entry_price']} | Exit: {t['exit_time']} @ {t['exit_price']} | Reason: {t['exit_reason']} | Net PnL: {t['net_pnl']}")
+    print("-" * 80)
 
-if __name__ == "__main__":
-    main()
+# Run tests on all available history
+run_and_verify("NSE_INDEX", "BANKNIFTY", "futures", None, None)
+run_and_verify("NSE_INDEX", "BANKNIFTY", "options_spread", None, None)
+
+run_and_verify("MCX_INDEX", "CRUDEOIL", "futures", None, None)
+run_and_verify("MCX_INDEX", "CRUDEOIL", "options_buying", None, None)
