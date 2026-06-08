@@ -413,15 +413,19 @@ def calculate_statutory_charges(profile, value, qty, side):
 
     if profile == "fo_options":
         brokerage = 20.0
-        stt = (value * 0.0015) if side == "SELL" else 0.0
-        txn = value * 0.0003553
+        # Oct 1, 2024 revision: Options STT increased to 0.1% on premium (sell side)
+        stt = (value * 0.001) if side == "SELL" else 0.0
+        # Oct 1, 2024 revision: True-to-label NSE transaction fee is 0.03503%
+        txn = value * 0.0003503
         sebi = value * 0.000001
         stamp = (value * 0.00003) if side == "BUY" else 0.0
         gst = (brokerage + sebi + txn) * 0.18
     elif profile == "fo_futures":
         brokerage = 20.0
-        stt = (value * 0.000125) if side == "SELL" else 0.0
-        txn = value * 0.000019
+        # Oct 1, 2024 revision: Futures STT increased to 0.02% (sell side)
+        stt = (value * 0.0002) if side == "SELL" else 0.0
+        # Oct 1, 2024 revision: True-to-label NSE transaction fee is 0.00173%
+        txn = value * 0.0000173
         sebi = value * 0.000001
         stamp = (value * 0.00002) if side == "BUY" else 0.0
         gst = (brokerage + sebi + txn) * 0.18
