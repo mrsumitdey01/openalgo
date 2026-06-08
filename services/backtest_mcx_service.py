@@ -470,21 +470,44 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
         from strategies.scripts.bot1_mcx_hull_dtc import HullBBI, DTCRibbon, check_signals
         from datetime import time as time_obj
 
-        symbol = params.get("symbol", "BANKNIFTY").strip().upper()
-        exchange = params.get("exchange", "NSE").strip().upper()
+        # ── MCX Contract Unit Sizes (physical units per lot) ──────────────────
+        # These are the official MCX contract specifications.
+        # 1 lot of CrudeOil = 100 barrels, so a 1-point move = Rs.100 per lot.
+        # This multiplier is applied to all value/PnL calculations so that
+        # our backtest matches Zerodha's brokerage calculator exactly.
+        MCX_UNIT_SIZES = {
+            "CRUDEOIL":   100,   # 100 barrels per lot
+            "CRUDEOILM":  10,    # 10 barrels per lot (mini)
+            "NATURALGAS": 1250,  # 1250 mmBtu per lot
+            "GOLDM":      100,   # 100 grams per lot (gold mini)
+            "GOLD":       1000,  # 1000 grams per lot (1 kg)
+            "SILVER":     30000, # 30 kg per lot
+            "SILVERM":    5000,  # 5 kg per lot
+            "COPPER":     2500,  # 2500 kg per lot
+            "ZINC":       5000,  # 5000 kg per lot
+            "LEAD":       5000,  # 5000 kg per lot
+            "ALUMINIUM":  5000,  # 5000 kg per lot
+            "NICKEL":     1500,  # 1500 kg per lot
+        }
+
+        symbol = params.get("symbol", "CRUDEOIL").strip().upper()
+        exchange = params.get("exchange", "MCX").strip().upper()
         interval = "1m"
         start_date_str = params.get("start_date")
         end_date_str = params.get("end_date")
-        
+
         capital = float(params.get("capital", 100000.0))
         execution_mode = params.get("execution_mode", "options_spread")
-        
+
         if execution_mode == "futures":
             charges_profile = "mcx_futures"
         else:
             charges_profile = "mcx_options"
-            
-        lot_size = int(params.get("lot_size", 1))  # MCX uses plain qty, default = 1
+
+        lot_size = int(params.get("lot_size", 1))  # number of lots (QTY in UI)
+
+        # Physical units per lot — applied to all value/PnL calculations
+        unit_size = MCX_UNIT_SIZES.get(symbol, 1)
 
         start_ts = None
         end_ts = None
@@ -518,13 +541,19 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
         NO_NEW_ENTRIES = time_obj(22, 0)
         HARD_SQUARE_OFF = time_obj(22, 30)
 
-        # Spread delta converts spot movement to profile-specific PnL
+        # Spread delta converts spot movement to profile-specific PnL multiplier
         if execution_mode == "futures":
             spread_delta = 1.0
         elif execution_mode in ["options_buying", "options_selling"]:
             spread_delta = 0.5
-        else:
+        else:  # options_spread
             spread_delta = 0.25
+
+        # Total quantity in physical units = number of lots x unit size per lot
+        # Example: 1 lot CrudeOil = 1 x 100 barrels = 100 units
+        total_qty_units = lot_size * unit_size
+
+        logger.info(f"MCX Backtest: {symbol} | unit_size={unit_size} | lots={lot_size} | total_units={total_qty_units} | mode={execution_mode}")
 
         current_capital = capital
         peak_capital = capital
@@ -551,29 +580,32 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
             slice_df = df.iloc[slice_start:slice_end]
             signal = check_signals(slice_df, open_position["type"] if open_position else None)
 
-            # ── 1. EOD Hard Square-Off (matching live bot's 15:15 rule) ──
+            # ── 1. EOD Hard Square-Off ──
             if open_position is not None and candle_time >= HARD_SQUARE_OFF:
                 spot_diff = price - open_position["entry_spot"]
+                qty_units = open_position["qty_units"]  # lots × unit_size
                 if open_position["type"] == "LONG":
-                    gross_pnl = spot_diff * spread_delta * open_position["qty"]
+                    gross_pnl = spot_diff * spread_delta * qty_units
                     current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
                 else:
-                    gross_pnl = -spot_diff * spread_delta * open_position["qty"]
+                    gross_pnl = -spot_diff * spread_delta * qty_units
                     current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
-                
-                exit_value = abs(current_spread_val * open_position["qty"])
+
+                exit_value = abs(current_spread_val * qty_units)
                 exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, open_position["qty"], exit_side)
-                
+                exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty_units, exit_side)
+
                 net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
                 current_capital += (open_position["margin_blocked"] + gross_pnl - exit_fee)
-                
-                pnl_pct = (net_pnl / (open_position["entry_spread"] * open_position["qty"])) * 100.0 if (open_position["entry_spread"] > 0 and open_position["qty"] > 0) else 0.0
-                
+
+                entry_val = open_position["entry_spread"] * qty_units
+                pnl_pct = (net_pnl / entry_val) * 100.0 if entry_val > 0 else 0.0
+
                 trades.append({
                     "id": len(trades) + 1,
                     "direction": open_position["type"],
-                    "qty": open_position["qty"],
+                    "qty": open_position["lots"],           # lots (display)
+                    "qty_units": qty_units,                  # physical units
                     "entry_time": open_position["datetime"],
                     "entry_price": round(open_position["entry_spread"], 2),
                     "entry_fee": round(open_position["entry_fee"], 2),
@@ -591,13 +623,14 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
             # ── 2. Position Exit Logic ──
             elif open_position is not None:
                 spot_diff = price - open_position["entry_spot"]
+                qty_units = open_position["qty_units"]
                 if open_position["type"] == "LONG":
                     current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
-                    temp_gross_pnl = spot_diff * spread_delta * open_position["qty"]
+                    temp_gross_pnl = spot_diff * spread_delta * qty_units
                 else:
                     current_spread_val = open_position["entry_spread"] + (spot_diff * spread_delta)
-                    temp_gross_pnl = -spot_diff * spread_delta * open_position["qty"]
-                
+                    temp_gross_pnl = -spot_diff * spread_delta * qty_units
+
                 # Evaluate PnL Stop
                 pnl_stop_breached = False
                 if execution_mode == "futures":
@@ -606,10 +639,10 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
                     elif open_position["type"] == "SHORT" and spot_diff >= 150.0:
                         pnl_stop_breached = True
                 else:
-                    entry_value = open_position["entry_spread"] * open_position["qty"]
+                    entry_value = open_position["entry_spread"] * qty_units
                     if entry_value > 0 and temp_gross_pnl <= -0.15 * entry_value:
                         pnl_stop_breached = True
-                    
+
                 # Evaluate Structural Stop
                 structural_stop_breached = False
                 struct_stop = open_position.get("structural_stop")
@@ -618,7 +651,7 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
                         structural_stop_breached = True
                     elif open_position["type"] == "SHORT" and price > struct_stop:
                         structural_stop_breached = True
-                
+
                 # Determine exit with correct priority: stops > signal > end-of-data
                 should_exit = False
                 exit_reason = ""
@@ -634,23 +667,24 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
                 elif i == len(df) - 1:
                     should_exit = True
                     exit_reason = "End of Data"
-                
+
                 if should_exit:
-                    qty = open_position["qty"]
-                    exit_value = abs(current_spread_val * qty)
+                    exit_value = abs(current_spread_val * qty_units)
                     exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty, exit_side)
+                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty_units, exit_side)
 
                     gross_pnl = temp_gross_pnl
                     net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
                     current_capital += (open_position["margin_blocked"] + gross_pnl - exit_fee)
-                    
-                    pnl_pct = (net_pnl / (open_position["entry_spread"] * qty)) * 100.0 if (open_position["entry_spread"] > 0 and qty > 0) else 0.0
-                    
+
+                    entry_val = open_position["entry_spread"] * qty_units
+                    pnl_pct = (net_pnl / entry_val) * 100.0 if entry_val > 0 else 0.0
+
                     trades.append({
                         "id": len(trades) + 1,
                         "direction": open_position["type"],
-                        "qty": qty,
+                        "qty": open_position["lots"],       # lots (display)
+                        "qty_units": qty_units,              # physical units
                         "entry_time": open_position["datetime"],
                         "entry_price": round(open_position["entry_spread"], 2),
                         "entry_fee": round(open_position["entry_fee"], 2),
@@ -670,33 +704,35 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
             elif signal in ["LONG", "SHORT"] and i < len(df) - 1:
                 # Enforce trading hours (matching live bot time windows)
                 in_entry_window = (ENTRY_START <= candle_time <= NO_NEW_ENTRIES)
-                
+
                 if in_entry_window:
-                    # Dynamic margin based on spot price (works for any underlying)
+                    # For futures: entry_spread = spot price (actual futures price)
+                    # For options: entry_spread = synthetic premium (% of spot)
+                    # Charges and PnL are calculated on: entry_spread × total_qty_units
                     if execution_mode == "futures":
-                        margin_per_qty = price * 0.10
+                        margin_per_unit = price * 0.10
                         entry_spread = price
                     elif execution_mode == "options_buying":
-                        margin_per_qty = price * 0.01
+                        margin_per_unit = price * 0.01
                         entry_spread = price * 0.01
                     elif execution_mode == "options_selling":
-                        margin_per_qty = price * 0.10
+                        margin_per_unit = price * 0.10
                         entry_spread = price * 0.01
                     else:  # options_spread
-                        margin_per_qty = price * 0.005
+                        margin_per_unit = price * 0.005
                         entry_spread = price * 0.005
-                    
-                    qty = lot_size  # Fixed quantity: the user's chosen lot size
-                    margin_required = margin_per_qty * qty
-                    entry_value = entry_spread * qty
-                    
+
+                    # total_qty_units = lots × physical units per lot (e.g. 1 lot × 100 bbl)
+                    margin_required = margin_per_unit * total_qty_units
+                    entry_value = entry_spread * total_qty_units
+
                     entry_side = "SELL" if signal == "SHORT" else "BUY"
-                    entry_fee, fee_breakdown = calculate_statutory_charges(charges_profile, entry_value, qty, entry_side)
-                    
+                    entry_fee, fee_breakdown = calculate_statutory_charges(charges_profile, entry_value, total_qty_units, entry_side)
+
                     # Margin + fee check: skip trade if capital is insufficient
                     if current_capital >= (margin_required + entry_fee):
                         current_capital -= (margin_required + entry_fee)
-                        
+
                         # Compute structural stop from last 5 candles
                         lookback = 5
                         if i >= lookback:
@@ -707,12 +743,13 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
                                 structural_stop = float(candles["high"].max())
                         else:
                             structural_stop = price - 100 if signal == "LONG" else price + 100
-                            
+
                         open_position = {
                             "type": signal,
                             "entry_spot": price,
                             "entry_spread": entry_spread,
-                            "qty": qty,
+                            "lots": lot_size,               # number of lots (for display)
+                            "qty_units": total_qty_units,   # physical units (for calculations)
                             "datetime": dt_str,
                             "entry_fee": entry_fee,
                             "structural_stop": structural_stop,
@@ -723,10 +760,11 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
             effective_capital = current_capital
             if open_position is not None:
                 spot_diff = price - open_position["entry_spot"]
+                qty_units = open_position["qty_units"]
                 if open_position["type"] == "LONG":
-                    unrealized_pnl = spot_diff * spread_delta * open_position["qty"]
+                    unrealized_pnl = spot_diff * spread_delta * qty_units
                 else:
-                    unrealized_pnl = -spot_diff * spread_delta * open_position["qty"]
+                    unrealized_pnl = -spot_diff * spread_delta * qty_units
                 effective_capital += open_position["margin_blocked"] + unrealized_pnl
             
             capital_history[i] = effective_capital
