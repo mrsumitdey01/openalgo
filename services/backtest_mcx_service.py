@@ -484,7 +484,7 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
         else:
             charges_profile = "mcx_options"
             
-        lot_size = int(params.get("lot_size", 30))  # Fixed qty per trade
+        lot_size = int(params.get("lot_size", 1))  # MCX uses plain qty, default = 1
 
         start_ts = None
         end_ts = None

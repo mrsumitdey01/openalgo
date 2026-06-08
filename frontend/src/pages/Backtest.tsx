@@ -137,10 +137,14 @@ export default function Backtest() {
   // Custom Bots State
   const [selectedBot, setSelectedBot] = useState('bot1')
   const [botLotSize, setBotLotSize] = useState('30')
+  const [botQty, setBotQty] = useState('1')               // MCX uses plain quantity (not lot size)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [strategy, setStrategy] = useState('ema_crossover')
+
+  // Derived: detect if the selected symbol is an MCX commodity
+  const isMCX = selectedSymbolKey.startsWith('MCX')
 
   // Financial inputs
   const [capital, setCapital] = useState('100000')
@@ -387,11 +391,17 @@ export default function Backtest() {
                           <TableHeader className="bg-muted/30 sticky top-0 z-10">
                             <TableRow>
                               <TableHead className="w-12 text-center">ID</TableHead>
+                              <TableHead>Dir</TableHead>
                               <TableHead>Qty</TableHead>
-                              <TableHead>Entry Price</TableHead>
+                              <TableHead>Entry Price
+                                <span className="block text-[9px] font-normal text-muted-foreground/70">(spread value)</span>
+                              </TableHead>
                               <TableHead>Entry Time</TableHead>
-                              <TableHead>Exit Price</TableHead>
+                              <TableHead>Exit Price
+                                <span className="block text-[9px] font-normal text-muted-foreground/70">(spread value)</span>
+                              </TableHead>
                               <TableHead>Exit Time</TableHead>
+                              <TableHead className="text-right">Gross P&L</TableHead>
                               <TableHead className="text-right">Net P&L</TableHead>
                               <TableHead>Reason</TableHead>
                             </TableRow>
@@ -402,21 +412,35 @@ export default function Backtest() {
                                 <TableCell className="text-center font-semibold text-muted-foreground">
                                   {t.id}
                                 </TableCell>
+                                <TableCell>
+                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                                    t.direction === 'LONG' || t.direction === 'BUY'
+                                      ? 'bg-emerald-500/15 text-emerald-500'
+                                      : 'bg-red-500/15 text-red-500'
+                                  }`}>
+                                    {t.direction === 'LONG' ? 'BUY' : t.direction === 'SHORT' ? 'SELL' : t.direction}
+                                  </span>
+                                </TableCell>
                                 <TableCell className="font-medium">{t.qty}</TableCell>
-                                <TableCell>₹{t.entry_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell>₹{t.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.entry_time}
                                 </TableCell>
-                                <TableCell>₹{t.exit_price.toLocaleString('en-IN')}</TableCell>
+                                <TableCell>₹{t.exit_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.exit_time}
+                                </TableCell>
+                                <TableCell className={`text-right font-medium ${
+                                  t.gross_pnl >= 0 ? 'text-emerald-500/80' : 'text-red-500/80'
+                                }`}>
+                                  {t.gross_pnl >= 0 ? '+' : ''}₹{t.gross_pnl?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
                                 </TableCell>
                                 <TableCell
                                   className={`text-right font-bold ${
                                     t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
                                   }`}
                                 >
-                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN')}
+                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   <span className="text-[10px] block font-normal text-muted-foreground">
                                     {t.pnl_pct}%
                                   </span>
@@ -473,11 +497,21 @@ export default function Backtest() {
         setEndDate(new Date(maxTs * 1000).toISOString().split('T')[0])
       }
     }
-    
-    if (symbol.includes('BANKNIFTY')) {
-      setBotLotSize('30')
-    } else if (symbol.includes('NIFTY')) {
-      setBotLotSize('65')
+
+    // Auto-select bot and sizing defaults based on exchange/symbol
+    const isMCXExchange = exchange.startsWith('MCX')
+    if (isMCXExchange) {
+      // MCX commodities: route to MCX bot, default qty = 1
+      setSelectedBot('bot1_mcx')
+      setBotQty('1')
+    } else {
+      // NSE indices: route to NSE bot, auto-select lot size by symbol
+      setSelectedBot('bot1')
+      if (symbol.includes('BANKNIFTY')) {
+        setBotLotSize('30')
+      } else if (symbol.includes('NIFTY')) {
+        setBotLotSize('65')
+      }
     }
   }
 
@@ -493,15 +527,24 @@ export default function Backtest() {
     }
 
     const [exchange, symbol] = selectedSymbolKey.split(':')
+    const isMCXSymbol = exchange.startsWith('MCX')
+
+    // For MCX: use plain qty (no lot multiplier); for NSE: use lot_size
+    const resolvedQty = isMCXSymbol
+      ? (Number.parseInt(botQty) || 1)
+      : (Number.parseInt(botLotSize) || 30)
+
+    // Auto-route to correct bot based on exchange
+    const resolvedBotId = isMCXSymbol ? 'bot1_mcx' : 'bot1'
 
     const payload = {
-      bot_id: selectedBot,
+      bot_id: resolvedBotId,
       symbol,
       exchange,
       start_date: startDate,
       end_date: endDate,
       capital: Number.parseFloat(capital) || 100000,
-      lot_size: Number.parseInt(botLotSize) || 30,
+      lot_size: resolvedQty,
       execution_mode: botExecutionMode
     }
 
@@ -520,7 +563,7 @@ export default function Backtest() {
       const data = await response.json()
       if (data.status === 'success') {
         setBacktestResult(data)
-        showToast.success(`Bot Backtest completed for ${symbol}!`)
+        showToast.success(`Bot Backtest completed for ${symbol}! (${isMCXSymbol ? 'MCX' : 'NSE'} mode)`)
       } else {
         showToast.error(data.message || 'Bot Backtest failed')
       }
@@ -1287,17 +1330,6 @@ export default function Backtest() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="bot-select">Select Bot</Label>
-                  <Select value={selectedBot} onValueChange={setSelectedBot}>
-                    <SelectTrigger id="bot-select">
-                      <SelectValue placeholder="Select Bot Strategy" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bot1">Bot 1: Hull BBI + DTC Ribbon Options</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="bot-backtest-symbol">Symbol & Exchange</Label>
                   <Select value={selectedSymbolKey} onValueChange={handleSymbolChange}>
                     <SelectTrigger id="bot-backtest-symbol">
@@ -1311,6 +1343,17 @@ export default function Backtest() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {/* Exchange badge indicator */}
+                  {selectedSymbolKey && (
+                    <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                      isMCX
+                        ? 'bg-orange-500/15 text-orange-500 border border-orange-500/30'
+                        : 'bg-blue-500/15 text-blue-500 border border-blue-500/30'
+                    }`}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                      {isMCX ? 'MCX — Commodity Mode (10:00 AM – 10:30 PM)' : 'NSE — Equity Mode (09:30 AM – 03:15 PM)'}
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1323,7 +1366,7 @@ export default function Backtest() {
                     <Input id="bot-backtest-end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="bot-backtest-capital">Starting Capital</Label>
@@ -1333,20 +1376,40 @@ export default function Backtest() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="bot-lot-size">Lot Size</Label>
-                    <Select value={botLotSize} onValueChange={setBotLotSize}>
-                      <SelectTrigger id="bot-lot-size">
-                        <SelectValue placeholder="Select Lot Size" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="30">30 (BankNifty)</SelectItem>
-                        <SelectItem value="65">65 (Nifty)</SelectItem>
-                        <SelectItem value="15">15 (BankNifty Old)</SelectItem>
-                        <SelectItem value="25">25 (Nifty Old)</SelectItem>
-                        <SelectItem value="75">75 (Nifty Older)</SelectItem>
-                        <SelectItem value="1">1 (Crypto/Stocks)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {isMCX ? (
+                      // MCX: plain quantity input (no lot size system)
+                      <>
+                        <Label htmlFor="bot-mcx-qty">Quantity (QTY)</Label>
+                        <Input
+                          id="bot-mcx-qty"
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={botQty}
+                          onChange={(e) => setBotQty(e.target.value)}
+                          placeholder="Enter quantity"
+                        />
+                        <p className="text-[10px] text-muted-foreground">MCX uses quantity, not lot size</p>
+                      </>
+                    ) : (
+                      // NSE: lot size dropdown
+                      <>
+                        <Label htmlFor="bot-lot-size">Lot Size</Label>
+                        <Select value={botLotSize} onValueChange={setBotLotSize}>
+                          <SelectTrigger id="bot-lot-size">
+                            <SelectValue placeholder="Select Lot Size" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="30">30 (BankNifty)</SelectItem>
+                            <SelectItem value="65">65 (Nifty)</SelectItem>
+                            <SelectItem value="15">15 (BankNifty Old)</SelectItem>
+                            <SelectItem value="25">25 (Nifty Old)</SelectItem>
+                            <SelectItem value="75">75 (Nifty Older)</SelectItem>
+                            <SelectItem value="1">1 (Stocks)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -1365,7 +1428,13 @@ export default function Backtest() {
                   </Select>
                 </div>
 
-                <Button className="w-full mt-4 bg-primary text-primary-foreground font-semibold" size="lg" onClick={handleRunBotBacktest} disabled={running}>
+                {/* Active bot indicator */}
+                <div className="rounded-md bg-muted/40 border px-3 py-2 text-xs text-muted-foreground">
+                  <span className="font-semibold">Active Engine: </span>
+                  {isMCX ? 'Bot 1 MCX — Hull BBI + DTC Ribbon (Commodity)' : 'Bot 1 NSE — Hull BBI + DTC Ribbon (Equity)'}
+                </div>
+
+                <Button className="w-full mt-2 bg-primary text-primary-foreground font-semibold" size="lg" onClick={handleRunBotBacktest} disabled={running}>
                   {running ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Running...</> : <><Play className="mr-2 h-5 w-5" /> Run Bot Backtest</>}
                 </Button>
               </CardContent>
