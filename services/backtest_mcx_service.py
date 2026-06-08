@@ -471,23 +471,31 @@ def run_bot1_mcx_backtest(params: dict) -> tuple[bool, dict, int]:
         from datetime import time as time_obj
 
         # ── MCX Contract Unit Sizes (physical units per lot) ──────────────────
-        # These are the official MCX contract specifications.
-        # 1 lot of CrudeOil = 100 barrels, so a 1-point move = Rs.100 per lot.
-        # This multiplier is applied to all value/PnL calculations so that
-        # our backtest matches Zerodha's brokerage calculator exactly.
+        # These are the official MCX contract specifications, verified against
+        # Zerodha's brokerage calculator to match PnL and charges exactly.
+        #
+        # IMPORTANT: Gold prices on MCX are quoted per 10 grams, so:
+        #   GOLDM (100g lot)  = 100g / 10g = 10 units per lot
+        #   GOLD  (1kg lot)   = 1000g / 10g = 100 units per lot
+        #
+        # For all base metals and crude, price is per kg/barrel:
+        #   unit_size = lot size in that unit
         MCX_UNIT_SIZES = {
-            "CRUDEOIL":   100,   # 100 barrels per lot
-            "CRUDEOILM":  10,    # 10 barrels per lot (mini)
-            "NATURALGAS": 1250,  # 1250 mmBtu per lot
-            "GOLDM":      100,   # 100 grams per lot (gold mini)
-            "GOLD":       1000,  # 1000 grams per lot (1 kg)
-            "SILVER":     30000, # 30 kg per lot
-            "SILVERM":    5000,  # 5 kg per lot
-            "COPPER":     2500,  # 2500 kg per lot
-            "ZINC":       5000,  # 5000 kg per lot
-            "LEAD":       5000,  # 5000 kg per lot
-            "ALUMINIUM":  5000,  # 5000 kg per lot
-            "NICKEL":     1500,  # 1500 kg per lot
+            # ── Energy ──────────────────────────────────────────────────────
+            "CRUDEOIL":   100,   # 100 barrels/lot, price ₹/barrel   [Zerodha ✓]
+            "CRUDEOILM":  10,    # 10 barrels/lot (mini), price ₹/barrel
+            "NATURALGAS": 1250,  # 1250 mmBtu/lot, price ₹/mmBtu
+            # ── Precious Metals (price quoted ₹ per 10 grams) ─────────────
+            "GOLDM":      10,    # 100g lot / 10g per unit = 10 units  [Zerodha ✓]
+            "GOLD":       100,   # 1kg lot  / 10g per unit = 100 units [Zerodha ✓]
+            "SILVER":     30,    # 30 kg/lot, price ₹/kg
+            "SILVERM":    5,     # 5 kg/lot (mini), price ₹/kg
+            # ── Base Metals (price quoted ₹ per kg) ─────────────────────
+            "COPPER":     2500,  # 2500 kg/lot
+            "ZINC":       5000,  # 5000 kg/lot
+            "LEAD":       5000,  # 5000 kg/lot
+            "ALUMINIUM":  5000,  # 5000 kg/lot
+            "NICKEL":     1500,  # 1500 kg/lot
         }
 
         symbol = params.get("symbol", "CRUDEOIL").strip().upper()
