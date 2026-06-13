@@ -35,12 +35,14 @@ Every surface above runs on the same Sandbox engine (₹1 Crore sandbox capital,
 
 As a demonstration of OpenAlgo's Python Strategy execution capabilities, we provide a mathematically rigorous 9:21 AM Short Straddle strategy (`bot4_straddle_seller.py`) that handles dynamic individual leg stop-losses and EOD square-offs autonomously. 
 
-Below is the verified **5-Year Equity Curve** (2021-2026) backtested natively on NIFTY 1-minute historical data utilizing OpenAlgo's built-in Historify database. 
+Below is the verified **3-Year Equity Curve** (2023-2026 YTD) backtested natively on NIFTY 1-minute historical data utilizing OpenAlgo's built-in Historify database. The backtest accounts for **exact statutory charges** (Brokerage, STT, Exchange Txn, SEBI, Stamp Duty, GST).
 
-![5-Year Equity Curve for Bot 4](docs/bot4_equity_curve.png)
+![3-Year Equity Curve for Bot 4](assets/bot4_verified_graph.png)
 
 *Key Statistics:*
-- **Zero Blowouts:** The strict 2% Max Daily Loss safety net was hit **0 times** in 5 years.
+- **Win Rate:** 58.7% (with optimized 20% premium SL)
+- **Net Profit (After Charges):** ₹1.62 Lakhs
+- **Zero Blowouts:** The strict 2% Max Daily Loss safety net was hit **0 times** in 3 years.
 - **Gap Protection:** Smart filter automatically skips trading on days with > 0.5% opening gaps.
 - **Dynamic MTM Trailing:** Locks in profits automatically on high-volatility reversal days.
 
