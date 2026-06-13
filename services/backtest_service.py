@@ -1377,6 +1377,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
             # Determine Lot Size (Per Leg)
             qty = qty_param
+            
+            # Calculate Deployed Capital for MTM targets based on lot size
+            margin_per_lot = 120000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 130000)
+            base_lot_size = 15 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else 25)
+            deployed_capital = max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
 
             ce_entry = pe_entry = None
             ce_sl = pe_sl = None
@@ -1463,7 +1468,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_reason = "Both Legs SL Hit"
 
                 # Take Profit Target (Guaranteed Green Day)
-                if not aborted and live_mtm >= capital * PROFIT_TARGET_PCT:
+                if not aborted and live_mtm >= deployed_capital * PROFIT_TARGET_PCT:
                     aborted = True
                     if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
                     if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
@@ -1472,7 +1477,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     exit_reason = "Profit Target Hit"
 
                 # Check MTM trail
-                if not aborted and peak_mtm > capital * MTM_START:
+                if not aborted and peak_mtm > deployed_capital * MTM_START:
                     if live_mtm < peak_mtm * (1 - MTM_TRAIL_DD):
                         aborted = True
                         if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
@@ -1482,9 +1487,9 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_reason = "MTM Trailing SL"
 
                 # Check Max loss
-                if not aborted and live_mtm < -(capital * 0.02):
+                if not aborted and live_mtm < -(deployed_capital * 0.02):
                     aborted = True
-                    day_pnl = -(capital * 0.02)
+                    day_pnl = -(deployed_capital * 0.02)
                     ce_open = pe_open = False
                     exit_datetime = dt_str
                     exit_reason = "Max Daily Loss Hit"
@@ -1548,7 +1553,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 "entry_time": entry_datetime,
                 "entry_price": round(ce_entry, 2), # Using spot reference
                 "exit_time": exit_datetime,
-                "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2) if day_pnl != -(capital * 0.02) else round(ce_entry + (abs(day_pnl) / (qty * 2)), 2),
+                "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2) if day_pnl != -(deployed_capital * 0.02) else round(ce_entry + (abs(day_pnl) / (qty * 2)), 2),
                 "gross_pnl": round(day_pnl, 2),
                 "net_pnl": round(net_pnl, 2),
                 "pnl_pct": round((net_pnl / capital) * 100.0, 2),
