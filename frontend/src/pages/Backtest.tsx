@@ -140,6 +140,7 @@ export default function Backtest() {
   // Custom Bots State
   const [selectedBot, setSelectedBot] = useState('bot1')
   const [selectedBotAlgorithm, setSelectedBotAlgorithm] = useState('bot1')
+  const [bot4TargetType, setBot4TargetType] = useState('fixed_1600')
   const [botLotSize, setBotLotSize] = useState('30')
   const [applyBrokerage, setApplyBrokerage] = useState(true)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
@@ -552,7 +553,8 @@ export default function Backtest() {
       capital: Number.parseFloat(capital) || 100000,
       lot_size: resolvedQty,
       execution_mode: botExecutionMode,
-      apply_brokerage: applyBrokerage
+      apply_brokerage: applyBrokerage,
+      target_type: bot4TargetType // Specific to Bot 4
     }
 
     setRunning(true)
@@ -1437,6 +1439,21 @@ export default function Backtest() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {selectedBotAlgorithm === 'bot4' && (
+                  <div className="space-y-2">
+                    <Label>Profit Target Mode</Label>
+                    <Select value={bot4TargetType} onValueChange={setBot4TargetType}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Target" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fixed_1600">Fixed ₹1600 per lot</SelectItem>
+                        <SelectItem value="pct_capital">0.5% of Deployed Capital</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 {selectedBotAlgorithm !== 'bot4' && (
                   <div className="space-y-2">

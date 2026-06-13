@@ -1308,6 +1308,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         end_date_str = params.get("end_date")
         capital = float(params.get("capital", 800000.0))
         qty_param = int(params.get("lot_size", 25))
+        target_type = params.get("target_type", "fixed_1600")
         execution_mode = params.get("execution_mode", "options_selling")
         apply_brokerage = params.get("apply_brokerage", True)
 
@@ -1337,6 +1338,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         MTM_START = 0.0025
         MTM_TRAIL_DD = 0.30
         PROFIT_TARGET_PER_LOT = 1600
+        PROFIT_TARGET_PCT = 0.005
         sl_pct = 0.01
 
         grouped = df.groupby(df['dt'].dt.date)
@@ -1383,7 +1385,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
             deployed_capital = max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
             
-            target_profit = max(1, (qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
+            if target_type == "fixed_1600":
+                target_profit = max(1, (qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
+            else:
+                target_profit = deployed_capital * PROFIT_TARGET_PCT
 
             ce_entry = pe_entry = None
             ce_sl = pe_sl = None
