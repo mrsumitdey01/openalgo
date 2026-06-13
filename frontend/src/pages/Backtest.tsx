@@ -1,4 +1,4 @@
-import {
+﻿import {
   Activity,
   AlertCircle,
   ArrowDownRight,
@@ -14,16 +14,19 @@ import {
   TrendingUp,
   LineChart,
   Bot,
-  Zap
+  Zap,
+  StopCircle,
+  CircleDot
 } from 'lucide-react'
 import type * as PlotlyTypes from 'plotly.js'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Select,
   SelectContent,
@@ -136,9 +139,12 @@ export default function Backtest() {
 
   // Custom Bots State
   const [selectedBot, setSelectedBot] = useState('bot1')
+  const [selectedBotAlgorithm, setSelectedBotAlgorithm] = useState('bot1')
   const [botLotSize, setBotLotSize] = useState('30')
-  const [botQty, setBotQty] = useState('1')               // MCX uses plain quantity (not lot size)
+  const [applyBrokerage, setApplyBrokerage] = useState(true)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
+  const [botQty, setBotQty] = useState('1')               // MCX uses plain quantity (not lot size)
+
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [strategy, setStrategy] = useState('ema_crossover')
@@ -261,7 +267,7 @@ export default function Backtest() {
                         }`}
                       >
                         {backtestResult.metrics.net_pnl >= 0 ? '+' : ''}
-                        ₹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
+                        â‚¹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
                         <span className="text-xs font-semibold">
                           ({backtestResult.metrics.roi_pct}%)
                         </span>
@@ -422,25 +428,25 @@ export default function Backtest() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="font-medium">{t.qty}</TableCell>
-                                <TableCell>₹{t.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                <TableCell>â‚¹{t.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.entry_time}
                                 </TableCell>
-                                <TableCell>₹{t.exit_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                <TableCell>â‚¹{t.exit_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.exit_time}
                                 </TableCell>
                                 <TableCell className={`text-right font-medium ${
                                   t.gross_pnl >= 0 ? 'text-emerald-500/80' : 'text-red-500/80'
                                 }`}>
-                                  {t.gross_pnl >= 0 ? '+' : ''}₹{t.gross_pnl?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
+                                  {t.gross_pnl >= 0 ? '+' : ''}â‚¹{t.gross_pnl?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
                                 </TableCell>
                                 <TableCell
                                   className={`text-right font-bold ${
                                     t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
                                   }`}
                                 >
-                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {t.net_pnl >= 0 ? '+' : ''}â‚¹{t.net_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   <span className="text-[10px] block font-normal text-muted-foreground">
                                     {t.pnl_pct}%
                                   </span>
@@ -535,7 +541,7 @@ export default function Backtest() {
       : (Number.parseInt(botLotSize) || 30)
 
     // Auto-route to correct bot based on exchange
-    const resolvedBotId = isMCXSymbol ? 'bot1_mcx' : 'bot1'
+    const resolvedBotId = isMCXSymbol ? `${selectedBotAlgorithm}_mcx` : selectedBotAlgorithm
 
     const payload = {
       bot_id: resolvedBotId,
@@ -545,7 +551,8 @@ export default function Backtest() {
       end_date: endDate,
       capital: Number.parseFloat(capital) || 100000,
       lot_size: resolvedQty,
-      execution_mode: botExecutionMode
+      execution_mode: botExecutionMode,
+      apply_brokerage: applyBrokerage
     }
 
     setRunning(true)
@@ -954,12 +961,15 @@ export default function Backtest() {
 
       <Tabs defaultValue="simulator" className="w-full">
         <div className="flex justify-center mb-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsList className="grid w-full max-w-2xl grid-cols-3">
             <TabsTrigger value="simulator" className="flex items-center gap-2">
               <LineChart className="h-4 w-4" /> Standard Simulator
             </TabsTrigger>
             <TabsTrigger value="bots" className="flex items-center gap-2">
               <Bot className="h-4 w-4" /> Custom Bots Backtest
+            </TabsTrigger>
+            <TabsTrigger value="paper" className="flex items-center gap-2">
+              <CircleDot className="h-4 w-4" /> Paper Trading
             </TabsTrigger>
           </TabsList>
         </div>
@@ -1087,7 +1097,7 @@ export default function Backtest() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="backtest-commission-flat">Brokerage Flat (₹)</Label>
+                    <Label htmlFor="backtest-commission-flat">Brokerage Flat (â‚¹)</Label>
                     <Input
                       id="backtest-commission-flat"
                       type="number"
@@ -1313,7 +1323,7 @@ export default function Backtest() {
                     <p>Options spreads require two simultaneous executions. The bot uses a <strong>Place-and-Chase</strong> algorithm to combat slippage and liquidity gaps:</p>
                     <ul className="list-decimal list-outside ml-4 space-y-2">
                       <li><strong>Dynamic Limit Ordering:</strong> Captures the Last Traded Price (LTP) via WebSocket and places strict Limit orders (avoiding dangerous Market orders on illiquid strikes).</li>
-                      <li><strong>Order Chasing:</strong> If the order remains unfilled after a timeout loop (due to sudden volatility), it automatically cancels, fetches the fresh LTP, and re-places the limit order—"chasing" the price up to a defined slippage tolerance.</li>
+                      <li><strong>Order Chasing:</strong> If the order remains unfilled after a timeout loop (due to sudden volatility), it automatically cancels, fetches the fresh LTP, and re-places the limit orderâ€”"chasing" the price up to a defined slippage tolerance.</li>
                       <li><strong>Leg Reconciliation (Emergency Unwind):</strong> If the BUY leg fills but the SELL leg continuously fails (e.g. hitting circuit limits or extreme illiquidity), the bot prevents naked exposure by initiating an <em>Emergency Unwind</em>, immediately firing a closing market/limit order to reverse the filled BUY leg.</li>
                     </ul>
                   </CardContent>
@@ -1351,7 +1361,7 @@ export default function Backtest() {
                         : 'bg-blue-500/15 text-blue-500 border border-blue-500/30'
                     }`}>
                       <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                      {isMCX ? 'MCX — Commodity Mode (10:00 AM – 10:30 PM)' : 'NSE — Equity Mode (09:30 AM – 03:15 PM)'}
+                      {isMCX ? 'MCX â€” Commodity Mode (10:00 AM â€“ 10:30 PM)' : 'NSE â€” Equity Mode (09:30 AM â€“ 03:15 PM)'}
                     </div>
                   )}
                 </div>
@@ -1414,6 +1424,20 @@ export default function Backtest() {
                 </div>
 
                 <div className="space-y-2">
+                  <Label>Algorithm</Label>
+                  <Select value={selectedBotAlgorithm} onValueChange={setSelectedBotAlgorithm}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Algorithm" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bot1">Bot 1 (Hull + DTC)</SelectItem>
+                      <SelectItem value="bot2">Bot 2 (EMA Momentum)</SelectItem>
+                      <SelectItem value="bot3">Bot 3 (DTC Reversal SAR)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Execution Mode</Label>
                   <Select value={botExecutionMode} onValueChange={setBotExecutionMode}>
                     <SelectTrigger>
@@ -1428,10 +1452,18 @@ export default function Backtest() {
                   </Select>
                 </div>
 
+                <div className="flex items-center space-x-2 pt-4">
+                  <Switch id="apply-brokerage" checked={applyBrokerage} onCheckedChange={setApplyBrokerage} />
+                  <Label htmlFor="apply-brokerage" className="cursor-pointer">Apply Flat Brokerage Fee (Rs 20)</Label>
+                </div>
+
                 {/* Active bot indicator */}
                 <div className="rounded-md bg-muted/40 border px-3 py-2 text-xs text-muted-foreground">
                   <span className="font-semibold">Active Engine: </span>
-                  {isMCX ? 'Bot 1 MCX — Hull BBI + DTC Ribbon (Commodity)' : 'Bot 1 NSE — Hull BBI + DTC Ribbon (Equity)'}
+                  {selectedBotAlgorithm === 'bot2' 
+                    ? (isMCX ? `BOT 2 MCX â€” EMA Momentum Holy Grail` : `BOT 2 NSE â€” EMA Momentum Holy Grail`)
+                    : (isMCX ? `BOT 1 MCX â€” Hull BBI + DTC Ribbon (Commodity)` : `BOT 1 NSE â€” Hull BBI + DTC Ribbon (Equity)`)
+                  }
                 </div>
 
                 <Button className="w-full mt-2 bg-primary text-primary-foreground font-semibold" size="lg" onClick={handleRunBotBacktest} disabled={running}>
@@ -1458,7 +1490,395 @@ export default function Backtest() {
             </div>
           </div>
         </TabsContent>
+
+        {/* â”€â”€â”€ PAPER TRADE TAB â”€â”€â”€ */}
+        <TabsContent value="paper" className="mt-0">
+          <PaperTradePanel />
+        </TabsContent>
       </Tabs>
     </div>
   )
+}
+
+// â”€â”€â”€ Paper Trade Panel Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+interface PaperTradeAccount {
+  account_id: string
+  bot: string
+  exchange: string
+  symbol: string
+  execution_mode: string
+  status: string
+  error?: string
+  metrics: {
+    initial_capital: number
+    final_capital: number
+    net_pnl: number
+    roi_pct: number
+    total_trades: number
+    win_rate_pct: number
+    winning_trades: number
+    losing_trades: number
+    profit_factor: number
+    max_drawdown_pct: number
+    avg_trade_pnl: number
+    profitable_days: number
+    total_days: number
+  }
+  has_open_position: boolean
+}
+
+interface PaperTradeStatusResponse {
+  status: string
+  is_active: boolean
+  is_running: boolean
+  started_at: string | null
+  stopped_at: string | null
+  last_run_at: string | null
+  error: string | null
+  total_accounts: number
+  accounts: PaperTradeAccount[]
+}
+
+function PaperTradePanel() {
+  const [status, setStatus] = useState<PaperTradeStatusResponse | null>(null)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [filterBot, setFilterBot] = useState('all')
+  const [filterExchange, setFilterExchange] = useState('all')
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const csrfToken = await fetchCSRFTokenForPaper()
+      const res = await fetch('/historify/api/paper_trade/status', {
+        credentials: 'include',
+        headers: { 'X-CSRFToken': csrfToken },
+      })
+      const data = await res.json()
+      setStatus(data)
+    } catch (err) {
+      console.error('Failed to fetch paper trade status:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+    const interval = setInterval(fetchStatus, 5000) // Poll every 5s
+    return () => clearInterval(interval)
+  }, [fetchStatus])
+
+  const handleStart = async () => {
+    setActionLoading(true)
+    try {
+      const csrfToken = await fetchCSRFTokenForPaper()
+      await fetch('/historify/api/paper_trade/start', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      })
+      setTimeout(fetchStatus, 1000)
+    } catch (err) {
+      console.error('Failed to start paper trading:', err)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleStop = async () => {
+    setActionLoading(true)
+    try {
+      const csrfToken = await fetchCSRFTokenForPaper()
+      await fetch('/historify/api/paper_trade/stop', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+      })
+      setTimeout(fetchStatus, 500)
+    } catch (err) {
+      console.error('Failed to stop paper trading:', err)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const isActive = status?.is_active || false
+  const isRunning = status?.is_running || false
+  const accounts = status?.accounts || []
+
+  // Apply filters
+  const filteredAccounts = accounts.filter(a => {
+    if (filterBot !== 'all' && a.bot !== filterBot) return false
+    if (filterExchange !== 'all' && a.exchange !== filterExchange) return false
+    return true
+  })
+
+  // Summary stats
+  const totalPnl = accounts.reduce((s, a) => s + (a.metrics?.net_pnl || 0), 0)
+  const profitableAccounts = accounts.filter(a => (a.metrics?.net_pnl || 0) > 0).length
+  const totalTrades = accounts.reduce((s, a) => s + (a.metrics?.total_trades || 0), 0)
+
+  const botLabel = (bot: string) => {
+    if (bot === 'bot1') return 'Bot 1 (Hull+DTC)'
+    if (bot === 'bot2') return 'Bot 2 (EMA Mom)'
+    if (bot === 'bot3') return 'Bot 3 (DTC SAR)'
+    return bot
+  }
+
+  const modeLabel = (mode: string) => {
+    if (mode === 'futures') return 'Futures'
+    if (mode === 'options_buying') return 'Opt Buy'
+    if (mode === 'options_selling') return 'Opt Sell'
+    if (mode === 'options_spread') return 'Spread'
+    return mode
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Status Banner */}
+      <Card className={`border-2 ${
+        isActive
+          ? isRunning
+            ? 'border-amber-500/50 bg-amber-500/5'
+            : 'border-green-500/50 bg-green-500/5'
+          : 'border-border/50 bg-muted/5'
+      }`}>
+        <CardContent className="py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`h-4 w-4 rounded-full ${
+                isActive
+                  ? isRunning
+                    ? 'bg-amber-500 animate-pulse'
+                    : 'bg-green-500'
+                  : 'bg-muted-foreground/30'
+              }`} />
+              <div>
+                <h2 className="text-xl font-bold">
+                  {isActive
+                    ? isRunning
+                      ? 'Paper Trade Engine Running...'
+                      : 'Paper Trade Active'
+                    : 'Paper Trade Inactive'
+                  }
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {isActive && status?.started_at && `Started: ${status.started_at}`}
+                  {!isActive && status?.stopped_at && `Last stopped: ${status.stopped_at}`}
+                  {!isActive && !status?.stopped_at && 'Click Start to run all 3 bots across all execution modes'}
+                </p>
+                {status?.last_run_at && (
+                  <p className="text-xs text-muted-foreground/70 mt-1">Last completed: {status.last_run_at}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchStatus}
+                disabled={actionLoading}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              {!isActive ? (
+                <Button
+                  onClick={handleStart}
+                  disabled={actionLoading}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {actionLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Play className="h-4 w-4 mr-2" />
+                  )}
+                  Start Paper Trading
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleStop}
+                  disabled={actionLoading}
+                  variant="destructive"
+                >
+                  {actionLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <StopCircle className="h-4 w-4 mr-2" />
+                  )}
+                  Stop
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Summary Cards */}
+      {accounts.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Total Accounts</div>
+              <div className="text-2xl font-bold">{accounts.length}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Combined P&L</div>
+              <div className={`text-2xl font-bold ${totalPnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                â‚¹{totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Profitable Accounts</div>
+              <div className="text-2xl font-bold text-green-500">
+                {profitableAccounts} / {accounts.length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="text-sm text-muted-foreground">Total Trades</div>
+              <div className="text-2xl font-bold">{totalTrades.toLocaleString()}</div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filters */}
+      {accounts.length > 0 && (
+        <div className="flex gap-4 flex-wrap">
+          <Select value={filterBot} onValueChange={setFilterBot}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter by Bot" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Bots</SelectItem>
+              <SelectItem value="bot1">Bot 1 (Hull+DTC)</SelectItem>
+              <SelectItem value="bot2">Bot 2 (EMA Mom)</SelectItem>
+              <SelectItem value="bot3">Bot 3 (DTC SAR)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterExchange} onValueChange={setFilterExchange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Filter by Exchange" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Exchanges</SelectItem>
+              <SelectItem value="NSE">NSE</SelectItem>
+              <SelectItem value="MCX">MCX</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* Results Table */}
+      {filteredAccounts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Performance Dashboard ({filteredAccounts.length} accounts)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Bot</TableHead>
+                    <TableHead>Exchange</TableHead>
+                    <TableHead>Symbol</TableHead>
+                    <TableHead>Mode</TableHead>
+                    <TableHead className="text-right">Trades</TableHead>
+                    <TableHead className="text-right">Win Rate</TableHead>
+                    <TableHead className="text-right">Net P&L</TableHead>
+                    <TableHead className="text-right">ROI %</TableHead>
+                    <TableHead className="text-right">Max DD %</TableHead>
+                    <TableHead className="text-right">Profit Factor</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAccounts.map((acc) => {
+                    const m = acc.metrics
+                    const pnl = m?.net_pnl || 0
+                    return (
+                      <TableRow key={acc.account_id} className={pnl > 0 ? 'bg-green-500/5' : pnl < 0 ? 'bg-red-500/5' : ''}>
+                        <TableCell className="font-medium">{botLabel(acc.bot)}</TableCell>
+                        <TableCell>
+                          <Badge variant={acc.exchange === 'NSE' ? 'default' : 'secondary'}>
+                            {acc.exchange}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{acc.symbol}</TableCell>
+                        <TableCell>{modeLabel(acc.execution_mode)}</TableCell>
+                        <TableCell className="text-right">{m?.total_trades || 0}</TableCell>
+                        <TableCell className="text-right">
+                          <span className={(m?.win_rate_pct || 0) >= 50 ? 'text-green-500' : 'text-red-500'}>
+                            {(m?.win_rate_pct || 0).toFixed(1)}%
+                          </span>
+                        </TableCell>
+                        <TableCell className={`text-right font-semibold ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          â‚¹{pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </TableCell>
+                        <TableCell className={`text-right ${(m?.roi_pct || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                          {(m?.roi_pct || 0).toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right text-red-500">
+                          {(m?.max_drawdown_pct || 0).toFixed(1)}%
+                        </TableCell>
+                        <TableCell className="text-right">{(m?.profit_factor || 0).toFixed(2)}</TableCell>
+                        <TableCell className="text-center">
+                          {acc.status === 'ok' ? (
+                            acc.has_open_position ? (
+                              <Badge variant="outline" className="border-amber-500 text-amber-500">In Position</Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-green-500 text-green-500">Flat</Badge>
+                            )
+                          ) : acc.status === 'error' ? (
+                            <Badge variant="destructive">Error</Badge>
+                          ) : acc.status === 'no_data' ? (
+                            <Badge variant="secondary">No Data</Badge>
+                          ) : (
+                            <Badge variant="secondary">Pending</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Empty State */}
+      {!isActive && accounts.length === 0 && (
+        <Card className="flex flex-col items-center justify-center p-16 text-center border-dashed border-2 bg-muted/5 h-[400px]">
+          <CircleDot className="h-12 w-12 text-muted-foreground/60 mb-4" />
+          <h3 className="font-bold text-lg text-muted-foreground">Paper Trade Standby</h3>
+          <p className="text-muted-foreground/80 max-w-md text-sm mt-2">
+            Start paper trading to run all 3 bots (Hull+DTC, EMA Momentum, DTC SAR) across
+            futures, options buying, selling, and spreads for NSE and MCX.
+            Each account starts with â‚¹8,00,000 virtual capital.
+          </p>
+        </Card>
+      )}
+
+      {/* Running State */}
+      {isRunning && accounts.length === 0 && (
+        <Card className="flex flex-col items-center justify-center p-16 text-center bg-muted/5 h-[400px]">
+          <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+          <h3 className="font-bold text-lg text-primary">Processing All Accounts...</h3>
+          <p className="text-muted-foreground/80 text-sm mt-1">
+            Running 3 bots Ã— 4 modes Ã— multiple symbols. This may take a few minutes.
+          </p>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+async function fetchCSRFTokenForPaper(): Promise<string> {
+  const response = await fetch('/auth/csrf-token', { credentials: 'include' })
+  const data = await response.json()
+  return data.csrf_token
 }

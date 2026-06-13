@@ -1575,8 +1575,8 @@ def run_backtest_route():
 def run_backtest_bot_route():
     """Run specific custom bot backtest on stored historical data."""
     try:
-        from services.backtest_service import run_bot1_backtest
-        from services.backtest_mcx_service import run_bot1_mcx_backtest
+        from services.backtest_service import run_bot1_backtest, run_bot2_backtest, run_bot3_backtest
+        from services.backtest_mcx_service import run_bot1_mcx_backtest, run_bot2_mcx_backtest, run_bot3_mcx_backtest
 
         data = request.get_json() or {}
         bot_id = data.get("bot_id", "bot1")
@@ -1585,10 +1585,59 @@ def run_backtest_bot_route():
             success, response, status_code = run_bot1_backtest(data)
         elif bot_id == "bot1_mcx":
             success, response, status_code = run_bot1_mcx_backtest(data)
+        elif bot_id == "bot2":
+            success, response, status_code = run_bot2_backtest(data)
+        elif bot_id == "bot2_mcx":
+            success, response, status_code = run_bot2_mcx_backtest(data)
+        elif bot_id == "bot3":
+            success, response, status_code = run_bot3_backtest(data)
+        elif bot_id == "bot3_mcx":
+            success, response, status_code = run_bot3_mcx_backtest(data)
         else:
             return jsonify({"status": "error", "message": f"Unsupported bot ID: {bot_id}"}), 400
             
         return jsonify(response), status_code
     except Exception as e:
         logger.exception(f"Error in backtest bot route: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ─── Paper Trade Endpoints ──────────────────────────────────────────────────
+
+@historify_bp.route("/api/paper_trade/start", methods=["POST"])
+@check_session_validity
+def paper_trade_start():
+    """Start the paper trade engine across all bots and execution modes."""
+    try:
+        from services.paper_trade_service import start_paper_trading
+        result = start_paper_trading()
+        return jsonify(result), 200
+    except Exception as e:
+        logger.exception(f"Error starting paper trade: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@historify_bp.route("/api/paper_trade/stop", methods=["POST"])
+@check_session_validity
+def paper_trade_stop():
+    """Stop the paper trade engine."""
+    try:
+        from services.paper_trade_service import stop_paper_trading
+        result = stop_paper_trading()
+        return jsonify(result), 200
+    except Exception as e:
+        logger.exception(f"Error stopping paper trade: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@historify_bp.route("/api/paper_trade/status", methods=["GET"])
+@check_session_validity
+def paper_trade_status():
+    """Get paper trade engine status, all accounts, and P&L."""
+    try:
+        from services.paper_trade_service import get_paper_trade_status
+        result = get_paper_trade_status()
+        return jsonify(result), 200
+    except Exception as e:
+        logger.exception(f"Error getting paper trade status: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500

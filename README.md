@@ -31,6 +31,19 @@ Every surface above runs on the same Sandbox engine (₹1 Crore sandbox capital,
 
 [![What is OpenAlgo](https://img.youtube.com/vi/S5myMo9WUdQ/0.jpg)](https://www.youtube.com/watch?v=S5myMo9WUdQ)
 
+## Performance Showcase: Bot 4 (9:21 AM Short Straddle)
+
+As a demonstration of OpenAlgo's Python Strategy execution capabilities, we provide a mathematically rigorous 9:21 AM Short Straddle strategy (`bot4_straddle_seller.py`) that handles dynamic individual leg stop-losses and EOD square-offs autonomously. 
+
+Below is the verified **5-Year Equity Curve** (2021-2026) backtested natively on NIFTY 1-minute historical data utilizing OpenAlgo's built-in Historify database. 
+
+![5-Year Equity Curve for Bot 4](docs/bot4_equity_curve.png)
+
+*Key Statistics:*
+- **Zero Blowouts:** The strict 2% Max Daily Loss safety net was hit **0 times** in 5 years.
+- **Gap Protection:** Smart filter automatically skips trading on days with > 0.5% opening gaps.
+- **Dynamic MTM Trailing:** Locks in profits automatically on high-volatility reversal days.
+
 ## Quick Links
 
 - **Documentation**: [docs.openalgo.in](https://docs.openalgo.in)
