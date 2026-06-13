@@ -108,6 +108,8 @@ def load_state():
         "be_locked": False,   # FIX: break-even lock state persisted
         "ce_leg": None,
         "pe_leg": None,
+        "rolls_done": 0,
+        "max_rolls": 1,
     }
 
 def save_state(state):
@@ -247,6 +249,39 @@ def main():
                         if ce_ltp >= state["ce_leg"]["stop_loss"]:
                             print(f"[{datetime.now()}] CE STOP LOSS HIT! {ce_ltp} >= {state['ce_leg']['stop_loss']}")
                             close_leg(client, state["ce_leg"])
+                            
+                            # Dynamic Roll Logic
+                            if state.get("rolls_done", 0) < state.get("max_rolls", 1):
+                                if state["pe_leg"] and state["pe_leg"]["is_open"]:
+                                    close_leg(client, state["pe_leg"])
+                                    
+                                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+                                spot_price = spot_data.get("last_price")
+                                expiry_fmt, _ = get_nearest_expiry(client)
+                                
+                                if spot_price and expiry_fmt:
+                                    print(f"[{datetime.now()}] Market Trending UP. Rolling PE UP to ATM...")
+                                    atm_strike = resolve_atm_strike(spot_price)
+                                    new_pe_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}PE"
+                                    qty = state["pe_leg"]["qty"]
+                                    
+                                    if not PAPER_MODE:
+                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+                                    time.sleep(1)
+                                    new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", spot_price*0.01)
+                                    
+                                    state["pe_leg"] = {
+                                        "symbol": new_pe_sym,
+                                        "entry_price": new_pe_ltp,
+                                        "qty": qty,
+                                        "is_open": True,
+                                        "stop_loss": new_pe_ltp * (1 + LEG_STOP_LOSS_PCT)
+                                    }
+                                    state["rolls_done"] = state.get("rolls_done", 0) + 1
+                            else:
+                                if not state.get("pe_leg", {}).get("is_open"):
+                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day.")
+                                    state["aborted_for_day"] = True
                             save_state(state)
                         
                 # Check PE
@@ -257,6 +292,39 @@ def main():
                         if pe_ltp >= state["pe_leg"]["stop_loss"]:
                             print(f"[{datetime.now()}] PE STOP LOSS HIT! {pe_ltp} >= {state['pe_leg']['stop_loss']}")
                             close_leg(client, state["pe_leg"])
+                            
+                            # Dynamic Roll Logic
+                            if state.get("rolls_done", 0) < state.get("max_rolls", 1):
+                                if state["ce_leg"] and state["ce_leg"]["is_open"]:
+                                    close_leg(client, state["ce_leg"])
+                                    
+                                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+                                spot_price = spot_data.get("last_price")
+                                expiry_fmt, _ = get_nearest_expiry(client)
+                                
+                                if spot_price and expiry_fmt:
+                                    print(f"[{datetime.now()}] Market Trending DOWN. Rolling CE DOWN to ATM...")
+                                    atm_strike = resolve_atm_strike(spot_price)
+                                    new_ce_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}CE"
+                                    qty = state["ce_leg"]["qty"]
+                                    
+                                    if not PAPER_MODE:
+                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+                                    time.sleep(1)
+                                    new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", spot_price*0.01)
+                                    
+                                    state["ce_leg"] = {
+                                        "symbol": new_ce_sym,
+                                        "entry_price": new_ce_ltp,
+                                        "qty": qty,
+                                        "is_open": True,
+                                        "stop_loss": new_ce_ltp * (1 + LEG_STOP_LOSS_PCT)
+                                    }
+                                    state["rolls_done"] = state.get("rolls_done", 0) + 1
+                            else:
+                                if not state.get("ce_leg", {}).get("is_open"):
+                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day.")
+                                    state["aborted_for_day"] = True
                             save_state(state)
                             
                 # Update peak MTM

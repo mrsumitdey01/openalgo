@@ -1,4 +1,4 @@
-﻿import {
+import {
   Activity,
   AlertCircle,
   ArrowDownRight,
@@ -1433,24 +1433,27 @@ export default function Backtest() {
                       <SelectItem value="bot1">Bot 1 (Hull + DTC)</SelectItem>
                       <SelectItem value="bot2">Bot 2 (EMA Momentum)</SelectItem>
                       <SelectItem value="bot3">Bot 3 (DTC Reversal SAR)</SelectItem>
+                      <SelectItem value="bot4">Bot 4 (Straddle Seller)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Execution Mode</Label>
-                  <Select value={botExecutionMode} onValueChange={setBotExecutionMode}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select Mode" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="options_spread">Options Spread</SelectItem>
-                      <SelectItem value="options_buying">Options Buying (Naked)</SelectItem>
-                      <SelectItem value="options_selling">Options Selling (Naked)</SelectItem>
-                      <SelectItem value="futures">Futures</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {selectedBotAlgorithm !== 'bot4' && (
+                  <div className="space-y-2">
+                    <Label>Execution Mode</Label>
+                    <Select value={botExecutionMode} onValueChange={setBotExecutionMode}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select Mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="options_spread">Options Spread</SelectItem>
+                        <SelectItem value="options_buying">Options Buying (Naked)</SelectItem>
+                        <SelectItem value="options_selling">Options Selling (Naked)</SelectItem>
+                        <SelectItem value="futures">Futures</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <div className="flex items-center space-x-2 pt-4">
                   <Switch id="apply-brokerage" checked={applyBrokerage} onCheckedChange={setApplyBrokerage} />
@@ -1460,9 +1463,13 @@ export default function Backtest() {
                 {/* Active bot indicator */}
                 <div className="rounded-md bg-muted/40 border px-3 py-2 text-xs text-muted-foreground">
                   <span className="font-semibold">Active Engine: </span>
-                  {selectedBotAlgorithm === 'bot2' 
-                    ? (isMCX ? `BOT 2 MCX â€” EMA Momentum Holy Grail` : `BOT 2 NSE â€” EMA Momentum Holy Grail`)
-                    : (isMCX ? `BOT 1 MCX â€” Hull BBI + DTC Ribbon (Commodity)` : `BOT 1 NSE â€” Hull BBI + DTC Ribbon (Equity)`)
+                  {selectedBotAlgorithm === 'bot4'
+                    ? `BOT 4 NSE — 9:21 AM Short Straddle`
+                    : selectedBotAlgorithm === 'bot3'
+                    ? (isMCX ? `BOT 3 MCX — DTC Reversal SAR` : `BOT 3 NSE — DTC Reversal SAR`)
+                    : selectedBotAlgorithm === 'bot2' 
+                    ? (isMCX ? `BOT 2 MCX — EMA Momentum Holy Grail` : `BOT 2 NSE — EMA Momentum Holy Grail`)
+                    : (isMCX ? `BOT 1 MCX — Hull BBI + DTC Ribbon (Commodity)` : `BOT 1 NSE — Hull BBI + DTC Ribbon (Equity)`)
                   }
                 </div>
 
@@ -1617,8 +1624,12 @@ function PaperTradePanel() {
 
   const botLabel = (bot: string) => {
     if (bot === 'bot1') return 'Bot 1 (Hull+DTC)'
+    if (bot === 'bot1_mcx') return 'Bot 1 (MCX Hull)'
     if (bot === 'bot2') return 'Bot 2 (EMA Mom)'
+    if (bot === 'bot2_mcx') return 'Bot 2 (MCX EMA)'
     if (bot === 'bot3') return 'Bot 3 (DTC SAR)'
+    if (bot === 'bot3_mcx') return 'Bot 3 (MCX SAR)'
+    if (bot === 'bot4') return 'Bot 4 (Straddle Seller)'
     return bot
   }
 
@@ -1756,6 +1767,7 @@ function PaperTradePanel() {
               <SelectItem value="bot1">Bot 1 (Hull+DTC)</SelectItem>
               <SelectItem value="bot2">Bot 2 (EMA Mom)</SelectItem>
               <SelectItem value="bot3">Bot 3 (DTC SAR)</SelectItem>
+              <SelectItem value="bot4">Bot 4 (Straddle)</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filterExchange} onValueChange={setFilterExchange}>
