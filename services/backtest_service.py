@@ -1550,6 +1550,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2) if day_pnl != -(capital * 0.02) else round(ce_entry + (abs(day_pnl) / (qty * 2)), 2),
                 "gross_pnl": round(day_pnl, 2),
                 "net_pnl": round(net_pnl, 2),
+                "pnl_pct": round((net_pnl / capital) * 100.0, 2),
                 "exit_reason": exit_reason
             })
 
