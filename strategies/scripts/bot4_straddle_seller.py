@@ -54,7 +54,7 @@ MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02")) # 2% of capital 
 
 # Smart Adjustment Configs
 GAP_ABORT_PCT = float(os.getenv("GAP_ABORT_PCT", "0.005"))
-MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.005"))
+MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.0025"))
 
 ENTRY_TIME = os.getenv("ENTRY_TIME", "09:21")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
