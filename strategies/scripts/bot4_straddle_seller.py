@@ -52,8 +52,8 @@ LOT_MULTIPLIER = int(os.getenv("LOT_MULTIPLIER", "1"))
 STRIKE_INTERVAL = int(os.getenv("STRIKE_INTERVAL", str(_get_default_param("STRIKE_INTERVAL", UNDERLYING))))
 
 def get_deployed_capital(symbol, qty):
-    margin_per_lot = 120000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 130000)
-    base_lot_size = 15 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 25))
+    margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 160000)
+    base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
     return max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
 
 # Used as fallback if qty somehow isn't available
@@ -63,12 +63,14 @@ FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 # Equivalent to ~0.4% of spot. Backtest-proven: +Rs.1.5L and +14.8pp win rate over 3 years.
 LEG_STOP_LOSS_PCT = float(os.getenv("LEG_STOP_LOSS_PCT", "0.20"))
 
+MTM_START = 0.0025
+MTM_TRAIL_DD_PCT = 0.30
+PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
 
 # Smart Adjustment Configs
 GAP_ABORT_PCT      = float(os.getenv("GAP_ABORT_PCT",      "0.005"))   # skip if gap > 0.5%
 MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.0025")) # trail activates at 0.25% capital
-PROFIT_TARGET_PCT   = float(os.getenv("PROFIT_TARGET_PCT",   "0.005"))  # 0.5% profit target
 MTM_TRAIL_DD_PCT    = float(os.getenv("MTM_TRAIL_DD_PCT",    "0.30"))   # 30% trailing DD
 
 ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:21")
@@ -251,6 +253,10 @@ def main():
                 deployed_qty = state.get("ce_leg", {}).get("qty") or state.get("pe_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
                 dynamic_capital = get_deployed_capital(UNDERLYING, deployed_qty)
                 
+                # Dynamic base lot calculation for absolute target
+                base_lot_size = 30 if UNDERLYING == "BANKNIFTY" else (10 if UNDERLYING == "SENSEX" else (40 if UNDERLYING == "FINNIFTY" else 65))
+                target_profit = max(1, (deployed_qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
+                
                 # Check CE
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
                     ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price")
@@ -342,8 +348,8 @@ def main():
                     state["peak_mtm"] = current_mtm
 
                 # Smart Adjustment: Take Profit Target
-                if current_mtm >= (dynamic_capital * PROFIT_TARGET_PCT):
-                    print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f} (Target: {dynamic_capital * PROFIT_TARGET_PCT:.0f})")
+                if current_mtm >= target_profit:
+                    print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f} (Target: {target_profit:.0f})")
                     if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
                     if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True

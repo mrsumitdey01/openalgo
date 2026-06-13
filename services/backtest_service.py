@@ -1336,7 +1336,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         GAP_PCT = 0.005
         MTM_START = 0.0025
         MTM_TRAIL_DD = 0.30
-        PROFIT_TARGET_PCT = 0.005
+        PROFIT_TARGET_PER_LOT = 1600
         sl_pct = 0.01
 
         grouped = df.groupby(df['dt'].dt.date)
@@ -1379,9 +1379,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             qty = qty_param
             
             # Calculate Deployed Capital for MTM targets based on lot size
-            margin_per_lot = 120000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 130000)
-            base_lot_size = 15 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else 25)
+            margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 160000)
+            base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
             deployed_capital = max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
+            
+            target_profit = max(1, (qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
 
             ce_entry = pe_entry = None
             ce_sl = pe_sl = None
@@ -1489,7 +1491,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_reason = "Both Legs SL Hit"
 
                 # Take Profit Target (Guaranteed Green Day)
-                if not aborted and live_mtm >= deployed_capital * PROFIT_TARGET_PCT:
+                if not aborted and live_mtm >= target_profit:
                     aborted = True
                     day_pnl = live_mtm
                     ce_open = pe_open = False
