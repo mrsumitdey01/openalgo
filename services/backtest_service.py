@@ -489,7 +489,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
 
         df = get_ohlcv(
             symbol=symbol,
-            exchange=exchange,
+            exchange="NSE_INDEX" if exchange == "NSE" else exchange,
             interval=interval,
             start_timestamp=start_ts,
             end_timestamp=end_ts
@@ -1536,9 +1536,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             if buy_value < 0:
                 buy_value = 0 # Cannot be negative
                 
-            entry_fee, _ = calculate_statutory_charges(charges_profile, sell_value, qty * entry_legs, "SELL", legs=entry_legs, apply_brokerage=apply_brokerage)
-            exit_fee, _ = calculate_statutory_charges(charges_profile, buy_value, qty * exit_legs, "BUY", legs=exit_legs, apply_brokerage=apply_brokerage)
+            entry_fee, entry_fee_breakdown = calculate_statutory_charges(charges_profile, sell_value, qty * entry_legs, "SELL", legs=entry_legs, apply_brokerage=apply_brokerage)
+            exit_fee, exit_fee_breakdown = calculate_statutory_charges(charges_profile, buy_value, qty * exit_legs, "BUY", legs=exit_legs, apply_brokerage=apply_brokerage)
             total_charges = entry_fee + exit_fee
+            
+            combined_breakdown = {k: entry_fee_breakdown.get(k, 0) + exit_fee_breakdown.get(k, 0) for set_ in (entry_fee_breakdown, exit_fee_breakdown) for k in set_}
 
             net_pnl = day_pnl - total_charges
             current_capital += net_pnl
@@ -1554,10 +1556,13 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 "entry_price": round(ce_entry, 2), # Using spot reference
                 "exit_time": exit_datetime,
                 "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2) if day_pnl != -(deployed_capital * 0.02) else round(ce_entry + (abs(day_pnl) / (qty * 2)), 2),
+                "entry_fee": round(entry_fee, 2),
+                "exit_fee": round(exit_fee, 2),
                 "gross_pnl": round(day_pnl, 2),
                 "net_pnl": round(net_pnl, 2),
                 "pnl_pct": round((net_pnl / capital) * 100.0, 2),
-                "exit_reason": exit_reason
+                "exit_reason": exit_reason,
+                "fee_breakdown": combined_breakdown
             })
 
         df["capital_curve"] = capital_history
