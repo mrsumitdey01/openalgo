@@ -51,7 +51,13 @@ LOT_SIZE = int(os.getenv("LOT_SIZE", str(_get_default_param("LOT_SIZE", UNDERLYI
 LOT_MULTIPLIER = int(os.getenv("LOT_MULTIPLIER", "1"))
 STRIKE_INTERVAL = int(os.getenv("STRIKE_INTERVAL", str(_get_default_param("STRIKE_INTERVAL", UNDERLYING))))
 
-CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
+def get_deployed_capital(symbol, qty):
+    margin_per_lot = 120000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 130000)
+    base_lot_size = 15 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 25))
+    return max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
+
+# Used as fallback if qty somehow isn't available
+FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 
 # v3 FIX: Tightened from 25% to 20% of option premium.
 # Equivalent to ~0.4% of spot. Backtest-proven: +Rs.1.5L and +14.8pp win rate over 3 years.
@@ -241,6 +247,10 @@ def main():
             if state["entry_done"] and not state.get("aborted_for_day"):
                 current_mtm = 0
                 
+                # Dynamically calculate deployed capital based on actual traded qty
+                deployed_qty = state.get("ce_leg", {}).get("qty") or state.get("pe_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
+                dynamic_capital = get_deployed_capital(UNDERLYING, deployed_qty)
+                
                 # Check CE
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
                     ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price")
@@ -332,8 +342,8 @@ def main():
                     state["peak_mtm"] = current_mtm
 
                 # Smart Adjustment: Take Profit Target
-                if current_mtm >= (CAPITAL * PROFIT_TARGET_PCT):
-                    print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f}")
+                if current_mtm >= (dynamic_capital * PROFIT_TARGET_PCT):
+                    print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f} (Target: {dynamic_capital * PROFIT_TARGET_PCT:.0f})")
                     if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
                     if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True
@@ -341,7 +351,7 @@ def main():
                     continue
 
                 # Smart Adjustment 3: MTM Profit Trailing
-                if state.get("peak_mtm", 0) > (CAPITAL * MTM_TRAIL_START_PCT):
+                if state.get("peak_mtm", 0) > (dynamic_capital * MTM_TRAIL_START_PCT):
                     if current_mtm < (state["peak_mtm"] * (1 - MTM_TRAIL_DD_PCT)):
                         print(f"[{datetime.now()}] MTM TRAIL HIT! Current={current_mtm:.0f}, Peak={state['peak_mtm']:.0f}")
                         if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
@@ -351,8 +361,8 @@ def main():
                         continue
 
                 # Max Daily Loss Filter (hard 2% capital cap)
-                if current_mtm < -(CAPITAL * MAX_MTM_LOSS_PCT):
-                    print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(CAPITAL*MAX_MTM_LOSS_PCT):.0f}")
+                if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
+                    print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
                     if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
                     if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True
