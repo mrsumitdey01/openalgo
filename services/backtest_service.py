@@ -1452,7 +1452,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 if pe_open and price <= pe_sl:
                     pe_open = False
-                    day_pnl += (pe_entry - pe_sl) * 0.5 * qty
+                    day_pnl += (pe_sl - pe_entry) * 0.5 * qty
                     if rolls_done < max_rolls:
                         # Roll CE down
                         if ce_open:
