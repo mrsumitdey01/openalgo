@@ -1307,6 +1307,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         start_date_str = params.get("start_date")
         end_date_str = params.get("end_date")
         capital = float(params.get("capital", 800000.0))
+        qty_param = int(params.get("lot_size", 25))
         execution_mode = params.get("execution_mode", "options_selling")
         apply_brokerage = params.get("apply_brokerage", True)
 
@@ -1374,8 +1375,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     capital_history.append(current_capital)
                 continue
 
-            # Determine Lot Size
-            qty = 32 if date.weekday() == 2 else 65
+            # Determine Lot Size (Per Leg)
+            qty = qty_param
 
             ce_entry = pe_entry = None
             ce_sl = pe_sl = None
@@ -1543,7 +1544,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             trades.append({
                 "id": len(trades) + 1,
                 "direction": "SELL", # Short Straddle
-                "qty": qty * 2, # Combined lots
+                "qty": qty, # Per-leg quantity for display
                 "entry_time": entry_datetime,
                 "entry_price": round(ce_entry, 2), # Using spot reference
                 "exit_time": exit_datetime,
