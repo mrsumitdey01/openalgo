@@ -400,10 +400,10 @@ def run_backtest(params: dict) -> tuple[bool, dict, int]:
         logger.exception(f"Error in backtest execution: {e}")
         return False, {"status": "error", "message": f"Backtest failed: {str(e)}"}, 500
 
-def calculate_statutory_charges(profile, value, qty, side, legs=1, apply_brokerage=True):
-    # For spreads, gross turnover is much larger than net spread premium.
+def calculate_statutory_charges(profile, value, qty, side, legs=1, apply_brokerage=True, is_spread=False):
+    # For directional spreads (not straddles), the passed value is often just the net spread premium.
     # We approximate gross premium turnover as 5x the net spread premium for realistic STT/Txn fees.
-    if legs > 1:
+    if is_spread:
         value = value * 5.0
     """
     Calculates exact statutory charges for Indian markets based on the selected profile.
@@ -633,7 +633,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
                     qty = open_position["qty"]
                     exit_value = abs(current_spread_val * qty)
                     exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty, exit_side, legs=2 if 'spread' in execution_mode else 1)
+                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, qty, exit_side, legs=2 if 'spread' in execution_mode else 1, is_spread=('spread' in execution_mode))
 
                     gross_pnl = temp_gross_pnl
                     net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
@@ -930,7 +930,7 @@ def run_bot2_backtest(params: dict) -> tuple[bool, dict, int]:
                 if should_exit:
                     exit_value = abs(current_spread_val * total_qty_units)
                     exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1)
+                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1, is_spread=('spread' in execution_mode))
 
                     net_pnl = temp_gross_pnl - open_position["entry_fee"] - exit_fee
                     current_capital += (open_position["margin_blocked"] + temp_gross_pnl - exit_fee)
@@ -1121,7 +1121,7 @@ def run_bot3_backtest(params: dict) -> tuple[bool, dict, int]:
                 
                 exit_value = abs(open_position["entry_spread"] + (spot_diff * spread_delta)) * total_qty_units
                 exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage)
+                exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage, is_spread=('spread' in execution_mode))
 
                 net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
                 current_capital += (open_position["margin_blocked"] + gross_pnl - exit_fee)
@@ -1188,7 +1188,7 @@ def run_bot3_backtest(params: dict) -> tuple[bool, dict, int]:
                 if should_exit:
                     exit_value = abs(open_position["entry_spread"] + (spot_diff * spread_delta)) * total_qty_units
                     exit_side = "BUY" if open_position["type"] == "SHORT" else "SELL"
-                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage)
+                    exit_fee, fee_breakdown = calculate_statutory_charges(charges_profile, exit_value, total_qty_units, exit_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage, is_spread=('spread' in execution_mode))
 
                     gross_pnl = temp_gross_pnl
                     net_pnl = gross_pnl - open_position["entry_fee"] - exit_fee
@@ -1219,7 +1219,7 @@ def run_bot3_backtest(params: dict) -> tuple[bool, dict, int]:
                     entry_value = entry_spread * total_qty_units
                     
                     entry_side = "SELL" if signal == "SHORT" else "BUY"
-                    entry_fee, fee_breakdown = calculate_statutory_charges(charges_profile, entry_value, total_qty_units, entry_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage)
+                    entry_fee, fee_breakdown = calculate_statutory_charges(charges_profile, entry_value, total_qty_units, entry_side, legs=2 if 'spread' in execution_mode else 1, apply_brokerage=apply_brokerage, is_spread=('spread' in execution_mode))
                     
                     if current_capital >= (margin_required + entry_fee):
                         current_capital -= (margin_required + entry_fee)
@@ -1337,7 +1337,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         MTM_START = 0.0025
         MTM_TRAIL_DD = 0.30
         PROFIT_TARGET_PCT = 0.005
-        sl_pct = 0.004
+        sl_pct = 0.01
 
         grouped = df.groupby(df['dt'].dt.date)
 
@@ -1427,7 +1427,28 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 ce_mtm = (ce_entry - price) * 0.5 * qty if ce_open else 0.0
                 pe_mtm = (price - pe_entry) * 0.5 * qty if pe_open else 0.0
-                live_mtm = day_pnl + ce_mtm + pe_mtm
+                
+                # Realistic Options Simulation (Theta + Gamma)
+                minutes_held = (t.hour * 60 + t.minute) - (9 * 60 + 21)
+                if minutes_held < 0: minutes_held = 0
+                
+                # Assume 20% of total premium decays over 6 hours (360 mins)
+                total_premium = (ce_entry * 0.01 + pe_entry * 0.01) * qty
+                theta_profit = (minutes_held / 360.0) * (total_premium * 0.20)
+                
+                # Assume 1% spot move wipes out 15% of total premium (Gamma risk)
+                # Since CE/PE delta is approximated linearly, we need to explicitly penalize straddle divergence
+                spot_divergence = abs(price - ((ce_entry + pe_entry)/2))
+                divergence_pct = spot_divergence / ce_entry
+                gamma_loss = (divergence_pct / 0.01) * (total_premium * 0.15)
+                
+                simulated_options_pnl = theta_profit - gamma_loss
+                
+                # Only apply simulation to legs that are still open
+                open_legs_ratio = (1 if ce_open else 0) + (1 if pe_open else 0)
+                simulated_options_pnl = simulated_options_pnl * (open_legs_ratio / 2.0)
+                
+                live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl
 
                 if live_mtm > peak_mtm:
                     peak_mtm = live_mtm
@@ -1439,7 +1460,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     if rolls_done < max_rolls:
                         # Roll PE up
                         if pe_open:
-                            day_pnl += (price - pe_entry) * 0.5 * qty
+                            day_pnl += (price - pe_entry) * 0.5 * qty + simulated_options_pnl / 2.0
                         pe_entry = price
                         pe_sl = price * (1 - sl_pct)
                         pe_open = True
@@ -1456,7 +1477,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     if rolls_done < max_rolls:
                         # Roll CE down
                         if ce_open:
-                            day_pnl += (ce_entry - price) * 0.5 * qty
+                            day_pnl += (ce_entry - price) * 0.5 * qty + simulated_options_pnl / 2.0
                         ce_entry = price
                         ce_sl = price * (1 + sl_pct)
                         ce_open = True
@@ -1470,8 +1491,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 # Take Profit Target (Guaranteed Green Day)
                 if not aborted and live_mtm >= deployed_capital * PROFIT_TARGET_PCT:
                     aborted = True
-                    if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
-                    if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
+                    day_pnl = live_mtm
                     ce_open = pe_open = False
                     exit_datetime = dt_str
                     exit_reason = "Profit Target Hit"
@@ -1480,8 +1500,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 if not aborted and peak_mtm > deployed_capital * MTM_START:
                     if live_mtm < peak_mtm * (1 - MTM_TRAIL_DD):
                         aborted = True
-                        if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
-                        if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
+                        day_pnl = live_mtm
                         ce_open = pe_open = False
                         exit_datetime = dt_str
                         exit_reason = "MTM Trailing SL"
@@ -1496,8 +1515,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 # EOD Exit
                 if not aborted and t.hour == 15 and t.minute >= 15:
-                    if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
-                    if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
+                    day_pnl = live_mtm
                     ce_open = pe_open = False
                     aborted = True
                     exit_datetime = dt_str
