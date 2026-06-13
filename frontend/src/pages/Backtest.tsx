@@ -267,7 +267,7 @@ export default function Backtest() {
                         }`}
                       >
                         {backtestResult.metrics.net_pnl >= 0 ? '+' : ''}
-                        â‚¹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
+                        ₹{backtestResult.metrics.net_pnl.toLocaleString('en-IN')}
                         <span className="text-xs font-semibold">
                           ({backtestResult.metrics.roi_pct}%)
                         </span>
@@ -428,25 +428,25 @@ export default function Backtest() {
                                   </span>
                                 </TableCell>
                                 <TableCell className="font-medium">{t.qty}</TableCell>
-                                <TableCell>â‚¹{t.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                <TableCell>₹{t.entry_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.entry_time}
                                 </TableCell>
-                                <TableCell>â‚¹{t.exit_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                                <TableCell>₹{t.exit_price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
                                 <TableCell className="text-xs text-muted-foreground">
                                   {t.exit_time}
                                 </TableCell>
                                 <TableCell className={`text-right font-medium ${
                                   t.gross_pnl >= 0 ? 'text-emerald-500/80' : 'text-red-500/80'
                                 }`}>
-                                  {t.gross_pnl >= 0 ? '+' : ''}â‚¹{t.gross_pnl?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
+                                  {t.gross_pnl >= 0 ? '+' : ''}₹{t.gross_pnl?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'}
                                 </TableCell>
                                 <TableCell
                                   className={`text-right font-bold ${
                                     t.net_pnl >= 0 ? 'text-emerald-500' : 'text-red-500'
                                   }`}
                                 >
-                                  {t.net_pnl >= 0 ? '+' : ''}â‚¹{t.net_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {t.net_pnl >= 0 ? '+' : ''}₹{t.net_pnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   <span className="text-[10px] block font-normal text-muted-foreground">
                                     {t.pnl_pct}%
                                   </span>
@@ -1097,7 +1097,7 @@ export default function Backtest() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="backtest-commission-flat">Brokerage Flat (â‚¹)</Label>
+                    <Label htmlFor="backtest-commission-flat">Brokerage Flat (₹)</Label>
                     <Input
                       id="backtest-commission-flat"
                       type="number"
@@ -1734,7 +1734,7 @@ function PaperTradePanel() {
             <CardContent className="pt-6">
               <div className="text-sm text-muted-foreground">Combined P&L</div>
               <div className={`text-2xl font-bold ${totalPnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                â‚¹{totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                ₹{totalPnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
               </div>
             </CardContent>
           </Card>
@@ -1828,7 +1828,7 @@ function PaperTradePanel() {
                           </span>
                         </TableCell>
                         <TableCell className={`text-right font-semibold ${pnl >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                          â‚¹{pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          ₹{pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </TableCell>
                         <TableCell className={`text-right ${(m?.roi_pct || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                           {(m?.roi_pct || 0).toFixed(1)}%
@@ -1870,7 +1870,7 @@ function PaperTradePanel() {
           <p className="text-muted-foreground/80 max-w-md text-sm mt-2">
             Start paper trading to run all 3 bots (Hull+DTC, EMA Momentum, DTC SAR) across
             futures, options buying, selling, and spreads for NSE and MCX.
-            Each account starts with â‚¹8,00,000 virtual capital.
+            Each account starts with ₹8,00,000 virtual capital.
           </p>
         </Card>
       )}
