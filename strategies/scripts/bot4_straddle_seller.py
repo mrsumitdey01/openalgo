@@ -62,8 +62,8 @@ MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital
 # Smart Adjustment Configs
 GAP_ABORT_PCT      = float(os.getenv("GAP_ABORT_PCT",      "0.005"))   # skip if gap > 0.5%
 MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.0025")) # trail activates at 0.25% capital
-BE_LOCK_TRIGGER_PCT = float(os.getenv("BE_LOCK_TRIGGER_PCT", "0.0015")) # 0.15% profit triggers lock
-BE_LOCK_FLOOR_PCT   = float(os.getenv("BE_LOCK_FLOOR_PCT", "0.0005"))   # lock at 0.05% profit
+PROFIT_TARGET_PCT   = float(os.getenv("PROFIT_TARGET_PCT",   "0.005"))  # 0.5% profit target
+MTM_TRAIL_DD_PCT    = float(os.getenv("MTM_TRAIL_DD_PCT",    "0.30"))   # 30% trailing DD
 
 ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:21")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
@@ -331,9 +331,18 @@ def main():
                 if current_mtm > state.get("peak_mtm", 0):
                     state["peak_mtm"] = current_mtm
 
-                # Smart Adjustment 3: MTM Profit Trailing (activates at 0.25% of capital)
+                # Smart Adjustment: Take Profit Target
+                if current_mtm >= (CAPITAL * PROFIT_TARGET_PCT):
+                    print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f}")
+                    if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
+                    if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
+                    state["aborted_for_day"] = True
+                    save_state(state)
+                    continue
+
+                # Smart Adjustment 3: MTM Profit Trailing
                 if state.get("peak_mtm", 0) > (CAPITAL * MTM_TRAIL_START_PCT):
-                    if current_mtm < (state["peak_mtm"] * 0.5):
+                    if current_mtm < (state["peak_mtm"] * (1 - MTM_TRAIL_DD_PCT)):
                         print(f"[{datetime.now()}] MTM TRAIL HIT! Current={current_mtm:.0f}, Peak={state['peak_mtm']:.0f}")
                         if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
                         if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])

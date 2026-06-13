@@ -1319,7 +1319,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
         df = get_ohlcv(
             symbol,
-            exchange="NSE_INDEX" if exchange == "NSE" else exchange,
+            exchange="NSE_INDEX" if exchange == "NSE" else ("BSE_INDEX" if exchange == "BSE" else exchange),
             interval=interval,
             start_timestamp=start_ts,
             end_timestamp=end_ts
@@ -1334,7 +1334,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         # Bot 4 Strategy Parameters
         GAP_PCT = 0.005
         MTM_START = 0.0025
-        MTM_TRAIL_DD = 0.50
+        MTM_TRAIL_DD = 0.30
+        PROFIT_TARGET_PCT = 0.005
         sl_pct = 0.004
 
         grouped = df.groupby(df['dt'].dt.date)
@@ -1460,6 +1461,15 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_datetime = dt_str
                         exit_reason = "Both Legs SL Hit"
 
+                # Take Profit Target (Guaranteed Green Day)
+                if not aborted and live_mtm >= capital * PROFIT_TARGET_PCT:
+                    aborted = True
+                    if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
+                    if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
+                    ce_open = pe_open = False
+                    exit_datetime = dt_str
+                    exit_reason = "Profit Target Hit"
+
                 # Check MTM trail
                 if not aborted and peak_mtm > capital * MTM_START:
                     if live_mtm < peak_mtm * (1 - MTM_TRAIL_DD):
@@ -1479,7 +1489,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     exit_reason = "Max Daily Loss Hit"
 
                 # EOD Exit
-                if not aborted and t.hour == 15 and t.minute == 15:
+                if not aborted and t.hour == 15 and t.minute >= 15:
                     if ce_open: day_pnl += (ce_entry - price) * 0.5 * qty
                     if pe_open: day_pnl += (price - pe_entry) * 0.5 * qty
                     ce_open = pe_open = False
