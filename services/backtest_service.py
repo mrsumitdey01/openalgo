@@ -1417,11 +1417,24 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             
             # --- SMART DAY-OF-WEEK TARGET SWITCHER ---
             # Under new Tuesday expiry: Wed/Thu are slow theta days
-            day_name = pd.to_datetime(date).day_name()
-            if day_name in ['Wednesday', 'Thursday']:
-                smart_target = 500
+            dt_date = pd.to_datetime(date)
+            day_name = dt_date.day_name()
+            
+            # NIFTY Expiry Shifted from Thursday to Tuesday on Sept 1, 2025
+            if dt_date < pd.Timestamp('2025-09-01'):
+                if day_name == 'Thursday':
+                    smart_target = 300  # 0DTE Gamma Risk - Exit Early
+                elif day_name == 'Wednesday':
+                    smart_target = 500  # 1DTE High Theta
+                else:
+                    smart_target = 800  # 2+ DTE
             else:
-                smart_target = 800
+                if day_name == 'Tuesday':
+                    smart_target = 300  # 0DTE Gamma Risk - Exit Early
+                elif day_name == 'Monday':
+                    smart_target = 500  # 1DTE High Theta
+                else:
+                    smart_target = 800  # 2+ DTE
 
             if target_type == "fixed_1600":
                 target_profit = max(1, (qty / base_lot_size)) * smart_target

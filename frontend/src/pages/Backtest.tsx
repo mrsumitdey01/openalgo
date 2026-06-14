@@ -1448,7 +1448,7 @@ export default function Backtest() {
                         <SelectValue placeholder="Select Target" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="fixed_1600">Smart Dynamic Target (₹500/₹800 per lot)</SelectItem>
+                        <SelectItem value="fixed_1600">Smart Dynamic Target (₹300/₹500/₹800 per lot)</SelectItem>
                         <SelectItem value="pct_capital">0.5% of Deployed Capital</SelectItem>
                       </SelectContent>
                     </Select>
