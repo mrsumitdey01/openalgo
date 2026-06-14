@@ -1451,6 +1451,14 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             total_legs_traded = 4
 
             aborted = False
+            abort_reason = None
+            recovery_done = False
+            rec_ce_open = rec_pe_open = False
+            rec_ce_entry = rec_pe_entry = None
+            rec_ce_ref_spot = rec_pe_ref_spot = None
+            rec_ce_strike = rec_pe_strike = None
+            rec_ce_sl = rec_pe_sl = None
+            
             ce_open = pe_open = False
             ce_entry = pe_entry = None
             ce_ref_spot = pe_ref_spot = None
@@ -1508,6 +1516,26 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     capital_history.append(current_capital)
                     continue
                     
+                # --- RECOVERY MODULE ---
+                if aborted and abort_reason == "LOSS" and not recovery_done:
+                    if t.hour == 12 and t.minute >= 30:
+                        recovery_done = True
+                        aborted = False  # Un-abort to let recovery run
+                        rec_ce_open = True
+                        rec_pe_open = True
+                        
+                        rec_entry_spot = price
+                        rec_ce_strike = rec_entry_spot * 1.005
+                        rec_pe_strike = rec_entry_spot * 0.995
+                        rec_ce_entry = rec_entry_spot * 0.005 * 0.999 # Synthetic premium 0.5%
+                        rec_pe_entry = rec_entry_spot * 0.005 * 0.999
+                        rec_ce_ref_spot = rec_entry_spot
+                        rec_pe_ref_spot = rec_entry_spot
+                        rec_ce_sl = rec_entry_spot * 1.01
+                        rec_pe_sl = rec_entry_spot * 0.99
+                        
+                        total_legs_traded += 2
+                        
                 if aborted:
                     capital_history.append(current_capital + day_pnl)
                     continue
@@ -1551,14 +1579,36 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 simulated_options_pnl = simulated_options_pnl * (open_legs_ratio / 2.0)
                 # ---------------------------------------------------------------------------------
 
+                # Recovery PnL Tracking
+                rec_ce_mtm = 0.0
+                if rec_ce_open and price > rec_ce_strike:
+                    rec_ce_mtm = -(price - rec_ce_strike) * qty
+                rec_pe_mtm = 0.0
+                if rec_pe_open and price < rec_pe_strike:
+                    rec_pe_mtm = (rec_pe_strike - price) * qty
+                    
+                rec_sim_options_pnl = 0.0
+                if rec_ce_open or rec_pe_open:
+                    rec_mins_held = max(0, (t.hour * 60 + t.minute) - (12 * 60 + 30))
+                    rec_theta_profit = (rec_mins_held / 180.0) * ((rec_ce_entry + rec_pe_entry) * qty * 0.20)
+                    
+                    rec_divergence_pct = abs(price - rec_entry_spot) / rec_entry_spot if rec_entry_spot > 0 else 0
+                    rec_gamma_loss = (rec_divergence_pct / 0.01) * ((rec_ce_entry + rec_pe_entry) * qty * 0.15)
+                    
+                    rec_sim_options_pnl = rec_theta_profit - rec_gamma_loss
+                    
+                    rec_open_ratio = (1 if rec_ce_open else 0) + (1 if rec_pe_open else 0)
+                    rec_sim_options_pnl = rec_sim_options_pnl * (rec_open_ratio / 2.0)
+
                 # ---------------------------------------------------------------------------------
-                live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl
+                live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl + rec_ce_mtm + rec_pe_mtm + rec_sim_options_pnl
                 
 
                 
                 # 2. Max Daily Loss Hit
-                if not aborted and live_mtm < -(deployed_capital * 0.02):
+                if not aborted and not recovery_done and live_mtm < -(deployed_capital * 0.02):
                     aborted = True
+                    abort_reason = "LOSS"
                     day_pnl = -(deployed_capital * 0.02) - ((ce_entry + pe_entry) * qty * 0.005)
                     ce_open = pe_open = False
                     exit_datetime = dt_str
@@ -1581,6 +1631,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         total_legs_traded += 2
                     elif not pe_open:
                         aborted = True
+                        abort_reason = "LOSS"
                         exit_datetime = dt_str
                         exit_reason = "Both Legs SL Hit"
 
@@ -1599,16 +1650,38 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         total_legs_traded += 2
                     elif not ce_open:
                         aborted = True
+                        abort_reason = "LOSS"
                         exit_datetime = dt_str
                         exit_reason = "Both Legs SL Hit"
+                        
+                # Check Recovery SLs
+                if not aborted and rec_ce_open and high >= rec_ce_sl:
+                    rec_ce_open = False
+                    stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
+                    day_pnl += (-(price - rec_ce_strike) * qty) - (rec_ce_entry * qty * 0.001)
+                    if not rec_pe_open:
+                        aborted = True
+                        exit_datetime = dt_str
+                        exit_reason = "Recovery SL Hit"
+                        
+                if not aborted and rec_pe_open and low <= rec_pe_sl:
+                    rec_pe_open = False
+                    stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
+                    day_pnl += ((rec_pe_strike - price) * qty) - (rec_pe_entry * qty * 0.001)
+                    if not rec_ce_open:
+                        aborted = True
+                        exit_datetime = dt_str
+                        exit_reason = "Recovery SL Hit"
 
                 # 3. Take Profit Target (Guaranteed Green Day)
                 if not aborted and live_mtm >= target_profit:
                     aborted = True
+                    abort_reason = "PROFIT"
                     day_pnl = live_mtm - ((ce_entry + pe_entry) * qty * 0.001) # exit slippage
                     ce_open = pe_open = False
+                    rec_ce_open = rec_pe_open = False
                     exit_datetime = dt_str
-                    exit_reason = "Profit Target Hit"
+                    exit_reason = "Profit Target Hit (Recovery)" if recovery_done else "Profit Target Hit"
                     
                     if day_name in ['Wednesday', 'Thursday']:
                         stats["target_350_hits"] = stats.get("target_350_hits", 0) + 1
@@ -1619,9 +1692,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 if not aborted and t.hour == 15 and t.minute >= 15:
                     day_pnl = live_mtm
                     ce_open = pe_open = False
+                    rec_ce_open = rec_pe_open = False
                     aborted = True
                     exit_datetime = dt_str
-                    exit_reason = "EOD Square Off"
+                    exit_reason = "EOD Square Off (Recovery)" if recovery_done else "EOD Square Off"
                 
                 # Append running capital state
                 if aborted:

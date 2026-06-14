@@ -114,6 +114,10 @@ def load_state():
         "rolls_done": 0,
         "max_rolls": 1,
         "realized_pnl": 0.0,
+        "abort_reason": None,
+        "recovery_done": False,
+        "rec_ce_leg": None,
+        "rec_pe_leg": None,
     }
 
 def save_state(state):
@@ -170,6 +174,43 @@ def execute_straddle(client, spot, expiry_formatted, qty):
         print(f"Execution failed: {e}")
         return None, None
 
+def execute_strangle(client, spot, expiry_formatted, qty, width_pct=0.005):
+    ce_strike = round((spot * (1 + width_pct)) / STRIKE_INTERVAL) * STRIKE_INTERVAL
+    pe_strike = round((spot * (1 - width_pct)) / STRIKE_INTERVAL) * STRIKE_INTERVAL
+    
+    ce_sym = f"{UNDERLYING}{expiry_formatted}{int(ce_strike)}CE"
+    pe_sym = f"{UNDERLYING}{expiry_formatted}{int(pe_strike)}PE"
+    
+    print(f"[{datetime.now()}] Executing 12:30 Recovery Strangle: SELL {ce_sym} & SELL {pe_sym}")
+    
+    try:
+        if not PAPER_MODE:
+            client.placeorder(strategy=STRATEGY_NAME, symbol=ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+            client.placeorder(strategy=STRATEGY_NAME, symbol=pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+        
+        time.sleep(1) 
+        ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=ce_sym).get("last_price", spot*0.01)
+        pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=pe_sym).get("last_price", spot*0.01)
+        
+        return {
+            "symbol": ce_sym,
+            "entry_price": ce_ltp,
+            "qty": qty,
+            "is_open": True,
+            "stop_loss_spot": spot * (1 + 0.01),
+            "ref_spot": spot
+        }, {
+            "symbol": pe_sym,
+            "entry_price": pe_ltp,
+            "qty": qty,
+            "is_open": True,
+            "stop_loss_spot": spot * (1 - 0.01),
+            "ref_spot": spot
+        }
+    except Exception as e:
+        print(f"Recovery Execution failed: {e}")
+        return None, None
+
 def close_leg(client, leg):
     print(f"[{datetime.now()}] Closing leg: {leg['symbol']}")
     if not PAPER_MODE:
@@ -193,7 +234,8 @@ def main():
             now_ist = get_ist_now()
             is_entry_minute, past_square_off = check_time_windows()
             
-            if past_square_off or state.get("aborted_for_day", False):
+            if past_square_off or (state.get("aborted_for_day", False) and not (state.get("abort_reason") == "LOSS" and not state.get("recovery_done", False))):
+                # EOD Square off for ALL legs
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
                     ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
                     state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
@@ -202,6 +244,15 @@ def main():
                     pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
                     state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
                     close_leg(client, state["pe_leg"])
+                if state.get("rec_ce_leg") and state["rec_ce_leg"]["is_open"]:
+                    r_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_ce_leg"]["symbol"]).get("last_price", state["rec_ce_leg"]["entry_price"])
+                    state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["rec_ce_leg"]["entry_price"] - r_ce_ltp) * state["rec_ce_leg"]["qty"]
+                    close_leg(client, state["rec_ce_leg"])
+                if state.get("rec_pe_leg") and state["rec_pe_leg"]["is_open"]:
+                    r_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_pe_leg"]["symbol"]).get("last_price", state["rec_pe_leg"]["entry_price"])
+                    state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["rec_pe_leg"]["entry_price"] - r_pe_ltp) * state["rec_pe_leg"]["qty"]
+                    close_leg(client, state["rec_pe_leg"])
+                    
                 state["entry_done"] = True
                 save_state(state)
                 
@@ -223,6 +274,7 @@ def main():
                     if gap_pct > GAP_ABORT_PCT:
                         print(f"[{datetime.now()}] ABORTING: Gap {gap_pct*100:.2f}% > threshold {GAP_ABORT_PCT*100:.2f}%")
                         state["aborted_for_day"] = True
+                        state["abort_reason"] = "GAP"
                         state["entry_done"] = True
                         save_state(state)
                         continue
@@ -242,11 +294,27 @@ def main():
                         state["be_locked"] = False  # reset break-even lock on new entry
                         save_state(state)
             
-            if state["entry_done"] and not state.get("aborted_for_day"):
-                current_mtm = state.get("realized_pnl", 0.0)
-                
-                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
-                current_spot = spot_data.get("last_price")
+            if state["entry_done"]:
+                # --- RECOVERY EXECUTION ---
+                if state.get("aborted_for_day") and state.get("abort_reason") == "LOSS" and not state.get("recovery_done"):
+                    if now_ist.hour == 12 and now_ist.minute >= 30:
+                        spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+                        spot_price = spot_data.get("last_price")
+                        expiry_fmt, _ = get_nearest_expiry(client)
+                        if spot_price and expiry_fmt:
+                            deployed_qty = state.get("ce_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
+                            r_ce_leg, r_pe_leg = execute_strangle(client, spot_price, expiry_fmt, deployed_qty, width_pct=0.005)
+                            if r_ce_leg and r_pe_leg:
+                                state["rec_ce_leg"] = r_ce_leg
+                                state["rec_pe_leg"] = r_pe_leg
+                                state["recovery_done"] = True
+                                save_state(state)
+                                
+                if not state.get("aborted_for_day") or state.get("recovery_done"):
+                    current_mtm = state.get("realized_pnl", 0.0)
+                    
+                    spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+                    current_spot = spot_data.get("last_price")
                 
                 # Dynamically calculate deployed capital based on actual traded qty
                 deployed_qty = state.get("ce_leg", {}).get("qty") or state.get("pe_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
@@ -307,8 +375,9 @@ def main():
                                     state["rolls_done"] = state.get("rolls_done", 0) + 1
                             else:
                                 if not state.get("pe_leg", {}).get("is_open"):
-                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day.")
+                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day (Armed for Recovery).")
                                     state["aborted_for_day"] = True
+                                    state["abort_reason"] = "LOSS"
                             save_state(state)
                         
                 # Check PE
@@ -350,8 +419,31 @@ def main():
                                     state["rolls_done"] = state.get("rolls_done", 0) + 1
                             else:
                                 if not state.get("ce_leg", {}).get("is_open"):
-                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day.")
+                                    print(f"[{datetime.now()}] Both legs SL hit and max rolls reached. Aborting for day (Armed for Recovery).")
                                     state["aborted_for_day"] = True
+                                    state["abort_reason"] = "LOSS"
+                            save_state(state)
+                            
+                # Check Recovery CE
+                if state.get("rec_ce_leg") and state["rec_ce_leg"]["is_open"]:
+                    r_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_ce_leg"]["symbol"]).get("last_price")
+                    if r_ce_ltp:
+                        current_mtm += (state["rec_ce_leg"]["entry_price"] - r_ce_ltp) * state["rec_ce_leg"]["qty"]
+                        if current_spot and current_spot >= state["rec_ce_leg"]["stop_loss_spot"]:
+                            print(f"[{datetime.now()}] REC CE STOP LOSS HIT! Spot {current_spot} >= {state['rec_ce_leg']['stop_loss_spot']}")
+                            state["realized_pnl"] += (state["rec_ce_leg"]["entry_price"] - r_ce_ltp) * state["rec_ce_leg"]["qty"]
+                            close_leg(client, state["rec_ce_leg"])
+                            save_state(state)
+                            
+                # Check Recovery PE
+                if state.get("rec_pe_leg") and state["rec_pe_leg"]["is_open"]:
+                    r_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_pe_leg"]["symbol"]).get("last_price")
+                    if r_pe_ltp:
+                        current_mtm += (state["rec_pe_leg"]["entry_price"] - r_pe_ltp) * state["rec_pe_leg"]["qty"]
+                        if current_spot and current_spot <= state["rec_pe_leg"]["stop_loss_spot"]:
+                            print(f"[{datetime.now()}] REC PE STOP LOSS HIT! Spot {current_spot} <= {state['rec_pe_leg']['stop_loss_spot']}")
+                            state["realized_pnl"] += (state["rec_pe_leg"]["entry_price"] - r_pe_ltp) * state["rec_pe_leg"]["qty"]
+                            close_leg(client, state["rec_pe_leg"])
                             save_state(state)
                             
                 # Update peak MTM
@@ -369,15 +461,25 @@ def main():
                         pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
                         state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
                         close_leg(client, state["pe_leg"])
-                    state["aborted_for_day"] = True
-                    save_state(state)
-                    continue
+                        if state.get("rec_ce_leg") and state["rec_ce_leg"]["is_open"]: 
+                            r_ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_ce_leg"]["symbol"]).get("last_price", state["rec_ce_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["rec_ce_leg"]["entry_price"] - r_ce_ltp_close) * state["rec_ce_leg"]["qty"]
+                            close_leg(client, state["rec_ce_leg"])
+                        if state.get("rec_pe_leg") and state["rec_pe_leg"]["is_open"]: 
+                            r_pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_pe_leg"]["symbol"]).get("last_price", state["rec_pe_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["rec_pe_leg"]["entry_price"] - r_pe_ltp_close) * state["rec_pe_leg"]["qty"]
+                            close_leg(client, state["rec_pe_leg"])
+                        state["aborted_for_day"] = True
+                        state["abort_reason"] = "PROFIT"
+                        save_state(state)
+                        continue
 
 
 
-                # Max Daily Loss Filter (hard 2% capital cap)
-                if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
-                    print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
+                    # Max Daily Loss Filter (hard 2% capital cap)
+                    if not state.get("recovery_done"):
+                        if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
+                            print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
                     if state["ce_leg"] and state["ce_leg"]["is_open"]: 
                         ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
                         state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
@@ -387,6 +489,7 @@ def main():
                         state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
                         close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True
+                    state["abort_reason"] = "LOSS"
                     save_state(state)
                     continue
                         
