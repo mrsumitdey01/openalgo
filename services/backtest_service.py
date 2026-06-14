@@ -1351,6 +1351,19 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         # Allow sweep tests to override SL without changing defaults
         sl_pct = float(params.get("sl_pct_override", 0.01))
         max_loss_pct = float(params.get("max_loss_pct_override", 0.02))
+        
+        # ---- Loss-Reduction Strategies (backtest-only params) ----
+        # Strategy A: Exit recovery at 14:00 if still in loss
+        rec_timed_exit = params.get("rec_timed_exit", False)
+        rec_timed_exit_hour = int(params.get("rec_timed_exit_hour", 14))
+        # Strategy B: Trailing SL on recovery once in profit by rec_trail_trigger Rs
+        rec_trailing_sl = params.get("rec_trailing_sl", False)
+        rec_trail_trigger = float(params.get("rec_trail_trigger", 500))
+        # Strategy C: Tighter recovery SL pct (default same as morning sl_pct)
+        rec_sl_pct = float(params.get("rec_sl_pct_override", 0.01))
+        # Strategy D/E: Skip certain days
+        skip_friday = params.get("skip_friday", False)
+        skip_thursday = params.get("skip_thursday", False)
 
         grouped = df.groupby(df['dt'].dt.date)
 
@@ -1449,6 +1462,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             entered = aborted = False
             
             rolls_done = 0
+            if skip_friday and day_name == 'Friday':
+                continue
+            if skip_thursday and day_name == 'Thursday':
+                continue
+                
             max_rolls = 1
             total_legs_traded = 4
 
@@ -1548,8 +1566,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                             rec_pe_entry = rec_entry_spot * 0.005 * 0.999
                             rec_ce_ref_spot = rec_entry_spot
                             rec_pe_ref_spot = rec_entry_spot
-                            rec_ce_sl = rec_entry_spot * 1.01
-                            rec_pe_sl = rec_entry_spot * 0.99
+                            rec_ce_sl = rec_entry_spot * (1 + rec_sl_pct)
+                            rec_pe_sl = rec_entry_spot * (1 - rec_sl_pct)
+                            rec_trail_peak = 0.0  # for trailing SL tracking
+                            rec_trail_sl_activated = False
                             
                             total_legs_traded += 2
                         
@@ -1621,6 +1641,33 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl + rec_ce_mtm + rec_pe_mtm + rec_sim_options_pnl
                 
 
+                
+                # ---- Strategy A: Recovery Timed Exit ----
+                if rec_timed_exit and recovery_done and not aborted and (rec_ce_open or rec_pe_open):
+                    if t.hour >= rec_timed_exit_hour:
+                        rec_live_pnl = rec_ce_mtm + rec_pe_mtm + rec_sim_options_pnl
+                        if rec_live_pnl < 0:  # only exit if losing
+                            day_pnl += rec_live_pnl
+                            rec_ce_open = rec_pe_open = False
+                            aborted = True
+                            exit_datetime = dt_str
+                            exit_reason = "Recovery Timed Exit (Loss Cut)"
+                
+                # ---- Strategy B: Recovery Trailing SL ----
+                if rec_trailing_sl and recovery_done and not aborted and (rec_ce_open or rec_pe_open):
+                    rec_live_pnl = rec_ce_mtm + rec_pe_mtm + rec_sim_options_pnl
+                    if rec_live_pnl > rec_trail_trigger:
+                        rec_trail_sl_activated = True
+                    if rec_trail_sl_activated:
+                        if rec_live_pnl > rec_trail_peak:
+                            rec_trail_peak = rec_live_pnl
+                        # If we drop 50% from peak, lock it in
+                        if rec_live_pnl < rec_trail_peak * 0.5:
+                            day_pnl += rec_live_pnl
+                            rec_ce_open = rec_pe_open = False
+                            aborted = True
+                            exit_datetime = dt_str
+                            exit_reason = "Recovery Trailing SL"
                 
                 # 2. Max Daily Loss Hit
                 if not aborted and not recovery_done and live_mtm < -(deployed_capital * max_loss_pct):
@@ -1780,7 +1827,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 "fee_breakdown": combined_breakdown
             })
 
-        df["capital_curve"] = capital_history
+        # Pad capital_history to match df length (skipped days have fewer rows)
+        if len(capital_history) < len(df):
+            last_val = capital_history[-1] if capital_history else capital
+            capital_history.extend([last_val] * (len(df) - len(capital_history)))
+        df["capital_curve"] = capital_history[:len(df)]
         total_trades = len(trades)
         winning_trades = sum(1 for t in trades if t["net_pnl"] > 0)
         losing_trades = sum(1 for t in trades if t["net_pnl"] < 0)
