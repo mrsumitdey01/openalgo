@@ -1437,9 +1437,13 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             max_rolls = 1
             total_legs_traded = 4
 
-
+            aborted = False
+            ce_open = pe_open = False
+            ce_entry = pe_entry = None
+            ce_ref_spot = pe_ref_spot = None
+            ce_sl = pe_sl = None
+            spot_at_entry = None
             day_pnl = 0.0
-            
             entry_datetime = None
             exit_datetime = None
             exit_reason = "EOD Square Off"
@@ -1459,6 +1463,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 if t.hour == 9 and t.minute == 30 and not ce_open and not pe_open and not aborted:
                     spot_at_entry = price
+                    ce_ref_spot = price
+                    pe_ref_spot = price
                     if use_real_premium:
                         # Real NSE Bhav Copy ATM option opening premiums
                         ce_entry = real_day["ce_open"]
@@ -1495,10 +1501,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 # Delta P&L: spot move × delta(0.5) × qty
                 # For short straddle: CE loses when spot rises, PE gains, and vice versa
-                spot_at_entry_ref = spot_at_entry if entered else price
-                spot_move = price - spot_at_entry_ref
-                ce_mtm = -spot_move * 0.5 * qty if ce_open else 0.0   # short CE loses when spot rises
-                pe_mtm =  spot_move * 0.5 * qty if pe_open else 0.0   # short PE gains when spot rises
+                ce_mtm = -(price - ce_ref_spot) * 0.5 * qty if ce_open else 0.0   # short CE loses when spot rises
+                pe_mtm =  (price - pe_ref_spot) * 0.5 * qty if pe_open else 0.0   # short PE gains when spot rises
 
                 # --- Options Simulation: Theta + Gamma (calibrated to real premium if available) ---
                 minutes_held = (t.hour * 60 + t.minute) - (9 * 60 + 21)
@@ -1514,6 +1518,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     theta_profit = (minutes_held / total_day_mins) * daily_theta
 
                     # Gamma: per-lot straddle premium × gamma factor
+                    spot_at_entry_ref = spot_at_entry if entered else price
                     spot_divergence = abs(price - spot_at_entry_ref)
                     divergence_pct = spot_divergence / spot_at_entry_ref if spot_at_entry_ref > 0 else 0
                     gamma_loss = (divergence_pct / 0.01) * (straddle_prem * 0.12)
@@ -1521,6 +1526,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     # Synthetic fallback: 1% of spot as total premium
                     total_premium = (ce_entry + pe_entry) * qty
                     theta_profit = (minutes_held / 360.0) * (total_premium * 0.20)
+                    spot_at_entry_ref = spot_at_entry if entered else price
                     spot_divergence = abs(price - spot_at_entry_ref)
                     divergence_pct = spot_divergence / spot_at_entry_ref if spot_at_entry_ref > 0 else 0
                     gamma_loss = (divergence_pct / 0.01) * (total_premium * 0.15)
@@ -1550,11 +1556,12 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     ce_open = False
                     stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
                     # Apply 0.1% exit slippage conceptually by reducing PnL slightly
-                    day_pnl += ((ce_entry - ce_sl) * 0.5 * qty) - (ce_entry * qty * 0.001)
+                    day_pnl += (-(ce_sl - ce_ref_spot) * 0.5 * qty) - (ce_entry * qty * 0.001)
                     if rolls_done < max_rolls:
                         if pe_open:
-                            day_pnl += (price - pe_entry) * 0.5 * qty + simulated_options_pnl / 2.0
-                        pe_entry = price * 0.999 # entry slippage
+                            day_pnl += ((price - pe_ref_spot) * 0.5 * qty) + simulated_options_pnl / 2.0
+                        pe_entry = price * 0.01 * 0.999 # new synthetic premium with entry slippage
+                        pe_ref_spot = price
                         pe_sl = price * (1 - sl_pct)
                         pe_open = True
                         rolls_done += 1
@@ -1567,11 +1574,12 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 if not aborted and pe_open and low <= pe_sl:
                     pe_open = False
                     stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
-                    day_pnl += ((pe_sl - pe_entry) * 0.5 * qty) - (pe_entry * qty * 0.001)
+                    day_pnl += ((pe_sl - pe_ref_spot) * 0.5 * qty) - (pe_entry * qty * 0.001)
                     if rolls_done < max_rolls:
                         if ce_open:
-                            day_pnl += (ce_entry - price) * 0.5 * qty + simulated_options_pnl / 2.0
-                        ce_entry = price * 0.999 # entry slippage
+                            day_pnl += (-(price - ce_ref_spot) * 0.5 * qty) + simulated_options_pnl / 2.0
+                        ce_entry = price * 0.01 * 0.999 # new synthetic premium with entry slippage
+                        ce_ref_spot = price
                         ce_sl = price * (1 + sl_pct)
                         ce_open = True
                         rolls_done += 1

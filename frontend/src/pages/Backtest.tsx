@@ -1448,7 +1448,7 @@ export default function Backtest() {
                         <SelectValue placeholder="Select Target" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="fixed_1600">Fixed ₹1600 per lot</SelectItem>
+                        <SelectItem value="fixed_1600">Smart Dynamic Target (₹500/₹800 per lot)</SelectItem>
                         <SelectItem value="pct_capital">0.5% of Deployed Capital</SelectItem>
                       </SelectContent>
                     </Select>
@@ -1481,7 +1481,7 @@ export default function Backtest() {
                 <div className="rounded-md bg-muted/40 border px-3 py-2 text-xs text-muted-foreground">
                   <span className="font-semibold">Active Engine: </span>
                   {selectedBotAlgorithm === 'bot4'
-                    ? `BOT 4 NSE — 9:21 AM Short Straddle`
+                    ? `BOT 4 NSE — 09:30 AM Short Straddle`
                     : selectedBotAlgorithm === 'bot3'
                     ? (isMCX ? `BOT 3 MCX — DTC Reversal SAR` : `BOT 3 NSE — DTC Reversal SAR`)
                     : selectedBotAlgorithm === 'bot2' 

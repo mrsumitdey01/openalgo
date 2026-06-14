@@ -46,7 +46,7 @@ def ensure_db_directory():
 
 
 @contextmanager
-def get_connection(max_retries: int = 3, retry_delay: float = 0.5):
+def get_connection(max_retries: int = 3, retry_delay: float = 0.5, read_only: bool = False):
     """
     Get a DuckDB connection with proper resource management and retry logic.
 
@@ -56,6 +56,7 @@ def get_connection(max_retries: int = 3, retry_delay: float = 0.5):
     Args:
         max_retries: Maximum number of connection attempts (default: 3)
         retry_delay: Delay in seconds between retries (default: 0.5)
+        read_only: Connect to DuckDB in read-only mode (default: False)
 
     Usage:
         with get_connection() as conn:
@@ -72,7 +73,7 @@ def get_connection(max_retries: int = 3, retry_delay: float = 0.5):
         try:
             import duckdb
 
-            conn = duckdb.connect(db_path, read_only=True)
+            conn = duckdb.connect(db_path, read_only=read_only)
             break
         except Exception as e:
             last_error = e
@@ -857,7 +858,7 @@ def get_ohlcv(
 
         query += " ORDER BY timestamp ASC"
 
-        with get_connection() as conn:
+        with get_connection(read_only=True) as conn:
             result = conn.execute(query, params).fetchdf()
 
         return result
@@ -1005,7 +1006,7 @@ def _get_aggregated_ohlcv(
             ORDER BY timestamp ASC
         """
 
-        with get_connection() as conn:
+        with get_connection(read_only=True) as conn:
             result = conn.execute(query, params).fetchdf()
 
         return result
@@ -1130,7 +1131,7 @@ def _get_daily_aggregated_ohlcv(
             ORDER BY timestamp ASC
         """
 
-        with get_connection() as conn:
+        with get_connection(read_only=True) as conn:
             result = conn.execute(query, params).fetchdf()
 
         return result
