@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
 ===============================================================================
-  BOT4_STRADDLE_SELLER.PY -- 9:21 AM Intraday Short Straddle Strategy
+  BOT4_STRADDLE_SELLER.PY -- 09:30 AM Intraday Short Straddle Strategy
   -------------------------------------------------------------------------
-  Executes a delta-neutral short straddle at 9:21 AM IST (post-settle-down).
+  Executes a delta-neutral short straddle at 09:30 AM IST (post-settle-down).
   Manages SL independently for the CE and PE legs.
   Squares off completely at 15:15 PM IST.
 
@@ -401,7 +401,7 @@ def main():
 def check_signals(df_slice: pd.DataFrame, current_position: str = None) -> str:
     """
     Signal generator for the paper trade engine.
-    Bot 4 is purely time-based: sell straddle at exactly 09:21.
+    Bot 4 is purely time-based: sell straddle at exactly 09:30.
     Handles both tz-aware and tz-naive DatetimeIndex.
     """
     if len(df_slice) < 1:
