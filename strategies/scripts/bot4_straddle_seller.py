@@ -59,19 +59,14 @@ def get_deployed_capital(symbol, qty):
 # Used as fallback if qty somehow isn't available
 FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 
-# v3 FIX: Tightened from 25% to 20% of option premium.
-# Equivalent to ~0.4% of spot. Backtest-proven: +Rs.1.5L and +14.8pp win rate over 3 years.
-LEG_STOP_LOSS_PCT = float(os.getenv("LEG_STOP_LOSS_PCT", "0.20"))
+# Backtest-proven: 1.0% Spot SL avoids getting chopped out by noise
+SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.01"))
 
-MTM_START = 0.0025
-MTM_TRAIL_DD_PCT = 0.30
 PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
 
 # Smart Adjustment Configs
-GAP_ABORT_PCT      = float(os.getenv("GAP_ABORT_PCT",      "0.005"))   # skip if gap > 0.5%
-MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.0025")) # trail activates at 0.25% capital
-MTM_TRAIL_DD_PCT    = float(os.getenv("MTM_TRAIL_DD_PCT",    "0.30"))   # 30% trailing DD
+GAP_ABORT_PCT = float(os.getenv("GAP_ABORT_PCT", "0.005"))   # skip if gap > 0.5%
 
 ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:30")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
@@ -160,13 +155,15 @@ def execute_straddle(client, spot, expiry_formatted, qty):
             "entry_price": ce_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss": ce_ltp * (1 + LEG_STOP_LOSS_PCT)
+            "stop_loss_spot": spot * (1 + SPOT_SL_PCT),
+            "ref_spot": spot
         }, {
             "symbol": pe_sym,
             "entry_price": pe_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss": pe_ltp * (1 + LEG_STOP_LOSS_PCT)
+            "stop_loss_spot": spot * (1 - SPOT_SL_PCT),
+            "ref_spot": spot
         }
     except Exception as e:
         print(f"Execution failed: {e}")
@@ -230,13 +227,7 @@ def main():
 
                 expiry_fmt, _ = get_nearest_expiry(client)
                 if expiry_fmt:
-                    # FIX: Wednesday Risk Reduction now correctly halves LOT_SIZE
-                    # (not LOT_MULTIPLIER which defaults to 1, making // 2 = 0)
-                    if now_ist.weekday() == 2:  # Wednesday
-                        final_qty = max(LOT_SIZE // 2, 1) * LOT_MULTIPLIER
-                        print(f"[{datetime.now()}] Wednesday: Half qty = {final_qty} (normally {LOT_SIZE * LOT_MULTIPLIER})")
-                    else:
-                        final_qty = LOT_SIZE * LOT_MULTIPLIER
+                    final_qty = LOT_SIZE * LOT_MULTIPLIER
 
                     ce_leg, pe_leg = execute_straddle(client, spot_price, expiry_fmt, final_qty)
                     if ce_leg and pe_leg:
@@ -248,6 +239,9 @@ def main():
             
             if state["entry_done"] and not state.get("aborted_for_day"):
                 current_mtm = 0
+                
+                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+                current_spot = spot_data.get("last_price")
                 
                 # Dynamically calculate deployed capital based on actual traded qty
                 deployed_qty = state.get("ce_leg", {}).get("qty") or state.get("pe_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
@@ -274,8 +268,8 @@ def main():
                     ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price")
                     if ce_ltp:
                         current_mtm += (state["ce_leg"]["entry_price"] - ce_ltp) * state["ce_leg"]["qty"]
-                        if ce_ltp >= state["ce_leg"]["stop_loss"]:
-                            print(f"[{datetime.now()}] CE STOP LOSS HIT! {ce_ltp} >= {state['ce_leg']['stop_loss']}")
+                        if current_spot and current_spot >= state["ce_leg"]["stop_loss_spot"]:
+                            print(f"[{datetime.now()}] CE STOP LOSS HIT! Spot {current_spot} >= {state['ce_leg']['stop_loss_spot']}")
                             close_leg(client, state["ce_leg"])
                             
                             # Dynamic Roll Logic
@@ -283,27 +277,24 @@ def main():
                                 if state["pe_leg"] and state["pe_leg"]["is_open"]:
                                     close_leg(client, state["pe_leg"])
                                     
-                                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
-                                spot_price = spot_data.get("last_price")
-                                expiry_fmt, _ = get_nearest_expiry(client)
-                                
-                                if spot_price and expiry_fmt:
+                                if current_spot and expiry_fmt:
                                     print(f"[{datetime.now()}] Market Trending UP. Rolling PE UP to ATM...")
-                                    atm_strike = resolve_atm_strike(spot_price)
+                                    atm_strike = resolve_atm_strike(current_spot)
                                     new_pe_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}PE"
                                     qty = state["pe_leg"]["qty"]
                                     
                                     if not PAPER_MODE:
                                         client.placeorder(strategy=STRATEGY_NAME, symbol=new_pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
                                     time.sleep(1)
-                                    new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", spot_price*0.01)
+                                    new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", current_spot*0.01)
                                     
                                     state["pe_leg"] = {
                                         "symbol": new_pe_sym,
                                         "entry_price": new_pe_ltp,
                                         "qty": qty,
                                         "is_open": True,
-                                        "stop_loss": new_pe_ltp * (1 + LEG_STOP_LOSS_PCT)
+                                        "stop_loss_spot": current_spot * (1 - SPOT_SL_PCT),
+                                        "ref_spot": current_spot
                                     }
                                     state["rolls_done"] = state.get("rolls_done", 0) + 1
                             else:
@@ -317,8 +308,8 @@ def main():
                     pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price")
                     if pe_ltp:
                         current_mtm += (state["pe_leg"]["entry_price"] - pe_ltp) * state["pe_leg"]["qty"]
-                        if pe_ltp >= state["pe_leg"]["stop_loss"]:
-                            print(f"[{datetime.now()}] PE STOP LOSS HIT! {pe_ltp} >= {state['pe_leg']['stop_loss']}")
+                        if current_spot and current_spot <= state["pe_leg"]["stop_loss_spot"]:
+                            print(f"[{datetime.now()}] PE STOP LOSS HIT! Spot {current_spot} <= {state['pe_leg']['stop_loss_spot']}")
                             close_leg(client, state["pe_leg"])
                             
                             # Dynamic Roll Logic
@@ -326,27 +317,24 @@ def main():
                                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
                                     close_leg(client, state["ce_leg"])
                                     
-                                spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
-                                spot_price = spot_data.get("last_price")
-                                expiry_fmt, _ = get_nearest_expiry(client)
-                                
-                                if spot_price and expiry_fmt:
+                                if current_spot and expiry_fmt:
                                     print(f"[{datetime.now()}] Market Trending DOWN. Rolling CE DOWN to ATM...")
-                                    atm_strike = resolve_atm_strike(spot_price)
+                                    atm_strike = resolve_atm_strike(current_spot)
                                     new_ce_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}CE"
                                     qty = state["ce_leg"]["qty"]
                                     
                                     if not PAPER_MODE:
                                         client.placeorder(strategy=STRATEGY_NAME, symbol=new_ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
                                     time.sleep(1)
-                                    new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", spot_price*0.01)
+                                    new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", current_spot*0.01)
                                     
                                     state["ce_leg"] = {
                                         "symbol": new_ce_sym,
                                         "entry_price": new_ce_ltp,
                                         "qty": qty,
                                         "is_open": True,
-                                        "stop_loss": new_ce_ltp * (1 + LEG_STOP_LOSS_PCT)
+                                        "stop_loss_spot": current_spot * (1 + SPOT_SL_PCT),
+                                        "ref_spot": current_spot
                                     }
                                     state["rolls_done"] = state.get("rolls_done", 0) + 1
                             else:
