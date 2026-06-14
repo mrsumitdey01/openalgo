@@ -1295,6 +1295,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
     try:
         import traceback
         import logging
+        import duckdb
+        import os
         from datetime import datetime, time as time_obj
         from database.historify_db import get_ohlcv
         from services.backtest_service import calculate_statutory_charges
@@ -1337,11 +1339,32 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         GAP_PCT = 0.005
         MTM_START = 0.0025
         MTM_TRAIL_DD = 0.30
-        PROFIT_TARGET_PER_LOT = 1600
-        PROFIT_TARGET_PCT = 0.005
+        PROFIT_TARGET_PER_LOT = float(params.get("profit_target_amount", 1600))
+        PROFIT_TARGET_PCT = float(params.get("profit_target_pct", 0.005))
         sl_pct = 0.01
 
         grouped = df.groupby(df['dt'].dt.date)
+
+        # --- Load real ATM premiums from options_daily_premiums (NSE Bhav Copy) ---
+        real_premiums = {}  # date -> {ce_open, pe_open, straddle_open, dte}
+        try:
+            db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "db", "historify.duckdb")
+            if os.path.exists(db_path):
+                bhav_con = duckdb.connect(db_path, read_only=True)
+                bhav_rows = bhav_con.execute(
+                    "SELECT date, ce_open, pe_open, straddle_open, dte FROM options_daily_premiums WHERE symbol=? AND date BETWEEN ? AND ? ORDER BY date",
+                    [symbol, start_date_str, end_date_str]
+                ).fetchall()
+                bhav_con.close()
+                for row in bhav_rows:
+                    real_premiums[row[0]] = {
+                        "ce_open": row[1], "pe_open": row[2],
+                        "straddle_open": row[3], "dte": row[4] or 7
+                    }
+                logger.info(f"Bot4 backtest: loaded {len(real_premiums)} days of real NSE Bhav Copy premiums for {symbol}")
+        except Exception as bhav_err:
+            logger.warning(f"Bot4 backtest: could not load real premiums ({bhav_err}), using synthetic model")
+        # -------------------------------------------------------------------------
 
         current_capital = capital
         peak_capital = capital
@@ -1406,6 +1429,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             exit_datetime = None
             exit_reason = "EOD Square Off"
 
+            # --- Determine real premium for today if available ---
+            real_day = real_premiums.get(date)
+            use_real_premium = real_day is not None
+            # ---------------------------------------------------------
+
             for idx, row in day_df.iterrows():
                 t = row['dt'].time()
                 price = float(row['close'])
@@ -1413,7 +1441,15 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 dt_str = row['datetime']
 
                 if t.hour == 9 and t.minute == 21 and not entered:
-                    ce_entry = pe_entry = price
+                    spot_at_entry = price
+                    if use_real_premium:
+                        # Real NSE Bhav Copy ATM option opening premiums
+                        ce_entry = real_day["ce_open"]
+                        pe_entry = real_day["pe_open"]
+                    else:
+                        # Synthetic fallback: 1% of spot per leg
+                        ce_entry = price * 0.01
+                        pe_entry = price * 0.01
                     ce_sl = price * (1 + sl_pct)
                     pe_sl = price * (1 - sl_pct)
                     ce_open = pe_open = True
@@ -1432,29 +1468,45 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                     capital_history.append(current_capital + day_pnl)
                     continue
 
-                ce_mtm = (ce_entry - price) * 0.5 * qty if ce_open else 0.0
-                pe_mtm = (price - pe_entry) * 0.5 * qty if pe_open else 0.0
-                
-                # Realistic Options Simulation (Theta + Gamma)
+                # Delta P&L: spot move × delta(0.5) × qty
+                # For short straddle: CE loses when spot rises, PE gains, and vice versa
+                spot_at_entry_ref = spot_at_entry if entered else price
+                spot_move = price - spot_at_entry_ref
+                ce_mtm = -spot_move * 0.5 * qty if ce_open else 0.0   # short CE loses when spot rises
+                pe_mtm =  spot_move * 0.5 * qty if pe_open else 0.0   # short PE gains when spot rises
+
+                # --- Options Simulation: Theta + Gamma (calibrated to real premium if available) ---
                 minutes_held = (t.hour * 60 + t.minute) - (9 * 60 + 21)
                 if minutes_held < 0: minutes_held = 0
-                
-                # Assume 20% of total premium decays over 6 hours (360 mins)
-                total_premium = (ce_entry * 0.01 + pe_entry * 0.01) * qty
-                theta_profit = (minutes_held / 360.0) * (total_premium * 0.20)
-                
-                # Assume 1% spot move wipes out 15% of total premium (Gamma risk)
-                # Since CE/PE delta is approximated linearly, we need to explicitly penalize straddle divergence
-                spot_divergence = abs(price - ((ce_entry + pe_entry)/2))
-                divergence_pct = spot_divergence / ce_entry
-                gamma_loss = (divergence_pct / 0.01) * (total_premium * 0.15)
-                
+
+                if use_real_premium:
+                    # Real premium from NSE Bhav Copy — theta modeled as % decay over DTE
+                    dte = max(real_day["dte"], 1)
+                    total_day_mins = 375.0  # 9:15 to 15:30
+                    # Intraday theta: roughly 1/DTE of total premium decays per day (linearly distributed)
+                    straddle_prem = real_day["straddle_open"] * qty
+                    daily_theta = straddle_prem / dte
+                    theta_profit = (minutes_held / total_day_mins) * daily_theta
+
+                    # Gamma: per-lot straddle premium × gamma factor
+                    spot_divergence = abs(price - spot_at_entry_ref)
+                    divergence_pct = spot_divergence / spot_at_entry_ref if spot_at_entry_ref > 0 else 0
+                    gamma_loss = (divergence_pct / 0.01) * (straddle_prem * 0.12)
+                else:
+                    # Synthetic fallback: 1% of spot as total premium
+                    total_premium = (ce_entry + pe_entry) * qty
+                    theta_profit = (minutes_held / 360.0) * (total_premium * 0.20)
+                    spot_divergence = abs(price - spot_at_entry_ref)
+                    divergence_pct = spot_divergence / spot_at_entry_ref if spot_at_entry_ref > 0 else 0
+                    gamma_loss = (divergence_pct / 0.01) * (total_premium * 0.15)
+
                 simulated_options_pnl = theta_profit - gamma_loss
-                
-                # Only apply simulation to legs that are still open
+
+                # Scale by how many legs are still open
                 open_legs_ratio = (1 if ce_open else 0) + (1 if pe_open else 0)
                 simulated_options_pnl = simulated_options_pnl * (open_legs_ratio / 2.0)
-                
+                # ---------------------------------------------------------------------------------
+
                 live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl
 
                 if live_mtm > peak_mtm:
@@ -1550,7 +1602,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 exit_datetime = day_df.iloc[-1]['datetime']
 
             # Calculate statutory charges for straddle selling
-            premium_per_leg = ce_entry * 0.01  # Synthesize options premium as 1% of spot
+            # Use real premium if available, else fall back to synthetic
+            if use_real_premium and real_day:
+                premium_per_leg = (real_day["ce_open"] + real_day["pe_open"]) / 2.0
+            else:
+                premium_per_leg = ce_entry  # ce_entry is already the option premium (real or synthetic)
             
             entry_legs = total_legs_traded // 2
             exit_legs = total_legs_traded // 2
