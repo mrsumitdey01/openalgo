@@ -72,7 +72,7 @@ def get_connection(max_retries: int = 3, retry_delay: float = 0.5):
         try:
             import duckdb
 
-            conn = duckdb.connect(db_path)
+            conn = duckdb.connect(db_path, read_only=True)
             break
         except Exception as e:
             last_error = e

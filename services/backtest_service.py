@@ -507,7 +507,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
         dtc = DTCRibbon()
         df = dtc.compute(df)
 
-        # â”€â”€ Trading session constants (matching live bot) â”€â”€
+        # ── Trading session constants (matching live bot) ──
         ENTRY_START = time_obj(9, 30)
         NO_NEW_ENTRIES = time_obj(14, 45)
         HARD_SQUARE_OFF = time_obj(15, 15)
@@ -536,16 +536,16 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
             candle_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
             candle_time = candle_dt.time()
             
-            # â”€â”€ Build signal slice â”€â”€
+            # ── Build signal slice ──
             # Include candle i so that get_last_completed_candle (which returns
-            # iloc[-2] for non-DatetimeIndex) evaluates candle i-1 â€” the true
+            # iloc[-2] for non-DatetimeIndex) evaluates candle i-1 — the true
             # last completed candle. Trade execution uses candle i's close price.
             slice_end = i + 1
             slice_start = max(0, slice_end - 6)
             slice_df = df.iloc[slice_start:slice_end]
             signal = check_signals(slice_df, open_position["type"] if open_position else None)
 
-            # â”€â”€ 1. EOD Hard Square-Off (matching live bot's 15:15 rule) â”€â”€
+            # ── 1. EOD Hard Square-Off (matching live bot's 15:15 rule) ──
             if open_position is not None and candle_time >= HARD_SQUARE_OFF:
                 spot_diff = price - open_position["entry_spot"]
                 if open_position["type"] == "LONG":
@@ -582,7 +582,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
                 })
                 open_position = None
 
-            # â”€â”€ 2. Position Exit Logic â”€â”€
+            # ── 2. Position Exit Logic ──
             elif open_position is not None:
                 spot_diff = price - open_position["entry_spot"]
                 if open_position["type"] == "LONG":
@@ -660,7 +660,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
                     open_position = None
 
 
-            # â”€â”€ 3. Position Entry Logic â”€â”€
+            # ── 3. Position Entry Logic ──
             elif signal in ["LONG", "SHORT"] and i < len(df) - 1:
                 # Enforce trading hours (matching live bot time windows)
                 in_entry_window = (ENTRY_START <= candle_time <= NO_NEW_ENTRIES)
@@ -713,7 +713,7 @@ def run_bot1_backtest(params: dict) -> tuple[bool, dict, int]:
                             "margin_blocked": margin_required
                         }
 
-            # â”€â”€ Capital curve and drawdown tracking â”€â”€
+            # ── Capital curve and drawdown tracking ──
             effective_capital = current_capital
             if open_position is not None:
                 spot_diff = price - open_position["entry_spot"]
@@ -1311,7 +1311,9 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         capital = float(params.get("capital", 800000.0))
         qty_param = int(params.get("lot_size", 25))
         target_type = params.get("target_type", "fixed_1600")
-        execution_mode = params.get("execution_mode", "options_selling")
+        # Base target from UI (will be overridden by smart switcher)
+        profit_target_amount = float(params.get("profit_target_amount", 600))
+        sl_pct = float(params.get("sl_pct", 0.25))
         apply_brokerage = params.get("apply_brokerage", True)
 
         # Force bot4 execution mode and charges profile
@@ -1335,10 +1337,15 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         df["datetime"] = df["timestamp"].apply(lambda t: datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M:%S"))
         df['dt'] = pd.to_datetime(df['timestamp'], unit='s', utc=True).dt.tz_convert('Asia/Kolkata')
         
+        stats = {
+            "total_bot4_trades": 0,
+            "total_bot4_sl_hits": 0,
+            "target_350_hits": 0,
+            "target_600_hits": 0
+        }
+
         # Bot 4 Strategy Parameters
         GAP_PCT = 0.005
-        MTM_START = 0.0025
-        MTM_TRAIL_DD = 0.30
         PROFIT_TARGET_PER_LOT = float(params.get("profit_target_amount", 1600))
         PROFIT_TARGET_PCT = float(params.get("profit_target_pct", 0.005))
         sl_pct = 0.01
@@ -1408,8 +1415,16 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
             deployed_capital = max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
             
+            # --- SMART DAY-OF-WEEK TARGET SWITCHER ---
+            # Under new Tuesday expiry: Wed/Thu are slow theta days
+            day_name = pd.to_datetime(date).day_name()
+            if day_name in ['Wednesday', 'Thursday']:
+                smart_target = 500
+            else:
+                smart_target = 800
+
             if target_type == "fixed_1600":
-                target_profit = max(1, (qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
+                target_profit = max(1, (qty / base_lot_size)) * smart_target
             else:
                 target_profit = deployed_capital * PROFIT_TARGET_PCT
 
@@ -1422,7 +1437,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             max_rolls = 1
             total_legs_traded = 4
 
-            peak_mtm = 0.0
+
             day_pnl = 0.0
             
             entry_datetime = None
@@ -1437,10 +1452,12 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             for idx, row in day_df.iterrows():
                 t = row['dt'].time()
                 price = float(row['close'])
+                high = float(row['high'])
+                low = float(row['low'])
                 ts = row['timestamp']
                 dt_str = row['datetime']
 
-                if t.hour == 9 and t.minute == 21 and not entered:
+                if t.hour == 9 and t.minute == 30 and not ce_open and not pe_open and not aborted:
                     spot_at_entry = price
                     if use_real_premium:
                         # Real NSE Bhav Copy ATM option opening premiums
@@ -1450,11 +1467,19 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         # Synthetic fallback: 1% of spot per leg
                         ce_entry = price * 0.01
                         pe_entry = price * 0.01
+                        
+                    # Apply 0.1% slippage penalty on entry premiums
+                    ce_entry *= 0.999
+                    pe_entry *= 0.999
+                    
                     ce_sl = price * (1 + sl_pct)
                     pe_sl = price * (1 - sl_pct)
                     ce_open = pe_open = True
                     entered = True
                     entry_datetime = dt_str
+
+                    # Record stats
+                    stats["total_bot4_trades"] = stats.get("total_bot4_trades", 0) + 1
                     
                     # Deduct entry fees conceptually (calculated properly at EOD)
                     capital_history.append(current_capital)
@@ -1507,20 +1532,29 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 simulated_options_pnl = simulated_options_pnl * (open_legs_ratio / 2.0)
                 # ---------------------------------------------------------------------------------
 
+                # ---------------------------------------------------------------------------------
                 live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl
+                
 
-                if live_mtm > peak_mtm:
-                    peak_mtm = live_mtm
+                
+                # 2. Max Daily Loss Hit
+                if not aborted and live_mtm < -(deployed_capital * 0.02):
+                    aborted = True
+                    day_pnl = -(deployed_capital * 0.02) - ((ce_entry + pe_entry) * qty * 0.005)
+                    ce_open = pe_open = False
+                    exit_datetime = dt_str
+                    exit_reason = "Max Daily Loss Hit"
 
-                # Check SL
-                if ce_open and price >= ce_sl:
+                # 2. Check Individual Leg Stop-Losses (Using candle High/Low)
+                if not aborted and ce_open and high >= ce_sl:
                     ce_open = False
-                    day_pnl += (ce_entry - ce_sl) * 0.5 * qty
+                    stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
+                    # Apply 0.1% exit slippage conceptually by reducing PnL slightly
+                    day_pnl += ((ce_entry - ce_sl) * 0.5 * qty) - (ce_entry * qty * 0.001)
                     if rolls_done < max_rolls:
-                        # Roll PE up
                         if pe_open:
                             day_pnl += (price - pe_entry) * 0.5 * qty + simulated_options_pnl / 2.0
-                        pe_entry = price
+                        pe_entry = price * 0.999 # entry slippage
                         pe_sl = price * (1 - sl_pct)
                         pe_open = True
                         rolls_done += 1
@@ -1530,14 +1564,14 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_datetime = dt_str
                         exit_reason = "Both Legs SL Hit"
 
-                if pe_open and price <= pe_sl:
+                if not aborted and pe_open and low <= pe_sl:
                     pe_open = False
-                    day_pnl += (pe_sl - pe_entry) * 0.5 * qty
+                    stats["total_bot4_sl_hits"] = stats.get("total_bot4_sl_hits", 0) + 1
+                    day_pnl += ((pe_sl - pe_entry) * 0.5 * qty) - (pe_entry * qty * 0.001)
                     if rolls_done < max_rolls:
-                        # Roll CE down
                         if ce_open:
                             day_pnl += (ce_entry - price) * 0.5 * qty + simulated_options_pnl / 2.0
-                        ce_entry = price
+                        ce_entry = price * 0.999 # entry slippage
                         ce_sl = price * (1 + sl_pct)
                         ce_open = True
                         rolls_done += 1
@@ -1547,30 +1581,18 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         exit_datetime = dt_str
                         exit_reason = "Both Legs SL Hit"
 
-                # Take Profit Target (Guaranteed Green Day)
+                # 3. Take Profit Target (Guaranteed Green Day)
                 if not aborted and live_mtm >= target_profit:
                     aborted = True
-                    day_pnl = live_mtm
+                    day_pnl = live_mtm - ((ce_entry + pe_entry) * qty * 0.001) # exit slippage
                     ce_open = pe_open = False
                     exit_datetime = dt_str
                     exit_reason = "Profit Target Hit"
-
-                # Check MTM trail
-                if not aborted and peak_mtm > deployed_capital * MTM_START:
-                    if live_mtm < peak_mtm * (1 - MTM_TRAIL_DD):
-                        aborted = True
-                        day_pnl = live_mtm
-                        ce_open = pe_open = False
-                        exit_datetime = dt_str
-                        exit_reason = "MTM Trailing SL"
-
-                # Check Max loss
-                if not aborted and live_mtm < -(deployed_capital * 0.02):
-                    aborted = True
-                    day_pnl = -(deployed_capital * 0.02)
-                    ce_open = pe_open = False
-                    exit_datetime = dt_str
-                    exit_reason = "Max Daily Loss Hit"
+                    
+                    if day_name in ['Wednesday', 'Thursday']:
+                        stats["target_350_hits"] = stats.get("target_350_hits", 0) + 1
+                    else:
+                        stats["target_600_hits"] = stats.get("target_600_hits", 0) + 1
 
                 # EOD Exit
                 if not aborted and t.hour == 15 and t.minute >= 15:
@@ -1636,7 +1658,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 "entry_time": entry_datetime,
                 "entry_price": round(ce_entry, 2), # Using spot reference
                 "exit_time": exit_datetime,
-                "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2) if day_pnl != -(deployed_capital * 0.02) else round(ce_entry + (abs(day_pnl) / (qty * 2)), 2),
+                "exit_price": round(ce_entry - (day_pnl / (qty * 2)), 2),
                 "entry_fee": round(entry_fee, 2),
                 "exit_fee": round(exit_fee, 2),
                 "gross_pnl": round(day_pnl, 2),
@@ -1694,7 +1716,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             "strategy": "bot4_straddle_seller",
             "metrics": metrics,
             "trades": trades,
-            "chart_data": chart_data
+            "chart_data": chart_data,
+            "stats": stats
         }, 200
 
     except Exception as e:

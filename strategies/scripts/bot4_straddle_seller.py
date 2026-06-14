@@ -255,7 +255,15 @@ def main():
                 
                 # Dynamic base lot calculation for absolute target
                 base_lot_size = 30 if UNDERLYING == "BANKNIFTY" else (10 if UNDERLYING == "SENSEX" else (40 if UNDERLYING == "FINNIFTY" else 65))
-                target_profit = max(1, (deployed_qty / base_lot_size)) * PROFIT_TARGET_PER_LOT
+                
+                # --- SMART DAY-OF-WEEK TARGET SWITCHER ---
+                day_of_week = get_ist_now().weekday() # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
+                if day_of_week in [2, 3]: # Wednesday & Thursday
+                    smart_target = 350
+                else:
+                    smart_target = 600
+                    
+                target_profit = max(1, (deployed_qty / base_lot_size)) * smart_target
                 
                 # Check CE
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
