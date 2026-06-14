@@ -1459,6 +1459,8 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             rec_ce_strike = rec_pe_strike = None
             rec_ce_sl = rec_pe_sl = None
             
+            day_open_price = None
+            
             ce_open = pe_open = False
             ce_entry = pe_entry = None
             ce_ref_spot = pe_ref_spot = None
@@ -1480,7 +1482,11 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 high = float(row['high'])
                 low = float(row['low'])
                 ts = row['timestamp']
-                dt_str = row['datetime']
+                dt_str = str(row['dt'])
+                open_px = float(row['open'])
+                
+                if day_open_price is None and t.hour == 9 and t.minute >= 15:
+                    day_open_price = open_px
 
                 if t.hour == 9 and t.minute == 30 and not ce_open and not pe_open and not aborted:
                     spot_at_entry = price
@@ -1520,21 +1526,30 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 if aborted and abort_reason == "LOSS" and not recovery_done:
                     if t.hour == 12 and t.minute >= 30:
                         recovery_done = True
-                        aborted = False  # Un-abort to let recovery run
-                        rec_ce_open = True
-                        rec_pe_open = True
                         
-                        rec_entry_spot = price
-                        rec_ce_strike = rec_entry_spot * 1.005
-                        rec_pe_strike = rec_entry_spot * 0.995
-                        rec_ce_entry = rec_entry_spot * 0.005 * 0.999 # Synthetic premium 0.5%
-                        rec_pe_entry = rec_entry_spot * 0.005 * 0.999
-                        rec_ce_ref_spot = rec_entry_spot
-                        rec_pe_ref_spot = rec_entry_spot
-                        rec_ce_sl = rec_entry_spot * 1.01
-                        rec_pe_sl = rec_entry_spot * 0.99
+                        trend_filter_pct = params.get("trend_filter_pct", 0.010)
+                        divergence = abs(price - day_open_price) / day_open_price if day_open_price else 0
                         
-                        total_legs_traded += 2
+                        if divergence > trend_filter_pct:
+                            # Do not deploy recovery, accept morning loss
+                            aborted = True
+                            exit_reason = "Loss (Extreme Trend Blocked Recovery)"
+                        else:
+                            aborted = False  # Un-abort to let recovery run
+                            rec_ce_open = True
+                            rec_pe_open = True
+                            
+                            rec_entry_spot = price
+                            rec_ce_strike = rec_entry_spot * 1.005
+                            rec_pe_strike = rec_entry_spot * 0.995
+                            rec_ce_entry = rec_entry_spot * 0.005 * 0.999 # Synthetic premium 0.5%
+                            rec_pe_entry = rec_entry_spot * 0.005 * 0.999
+                            rec_ce_ref_spot = rec_entry_spot
+                            rec_pe_ref_spot = rec_entry_spot
+                            rec_ce_sl = rec_entry_spot * 1.01
+                            rec_pe_sl = rec_entry_spot * 0.99
+                            
+                            total_legs_traded += 2
                         
                 if aborted:
                     capital_history.append(current_capital + day_pnl)

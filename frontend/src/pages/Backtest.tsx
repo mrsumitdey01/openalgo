@@ -141,6 +141,7 @@ export default function Backtest() {
   const [selectedBot, setSelectedBot] = useState('bot1')
   const [selectedBotAlgorithm, setSelectedBotAlgorithm] = useState('bot1')
   const [bot4TargetType, setBot4TargetType] = useState('fixed_1600')
+  const [bot4TrendFilterPct, setBot4TrendFilterPct] = useState('1.0')
   const [botLotSize, setBotLotSize] = useState('30')
   const [applyBrokerage, setApplyBrokerage] = useState(true)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
@@ -554,7 +555,8 @@ export default function Backtest() {
       lot_size: resolvedQty,
       execution_mode: botExecutionMode,
       apply_brokerage: applyBrokerage,
-      target_type: bot4TargetType // Specific to Bot 4
+      target_type: bot4TargetType, // Specific to Bot 4
+      trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100
     }
 
     setRunning(true)
@@ -1452,6 +1454,18 @@ export default function Backtest() {
                         <SelectItem value="pct_capital">0.5% of Deployed Capital</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                )}
+                
+                {selectedBotAlgorithm === 'bot4' && (
+                  <div className="space-y-2">
+                    <Label>Extreme Trend Filter (%)</Label>
+                    <Input 
+                      type="number" 
+                      step="0.1" 
+                      value={bot4TrendFilterPct} 
+                      onChange={(e) => setBot4TrendFilterPct(e.target.value)} 
+                    />
                   </div>
                 )}
 
