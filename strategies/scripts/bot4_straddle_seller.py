@@ -118,6 +118,7 @@ def load_state():
         "recovery_done": False,
         "rec_ce_leg": None,
         "rec_pe_leg": None,
+        "day_open_price": None,
     }
 
 def save_state(state):
@@ -267,6 +268,9 @@ def main():
                 spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
                 spot_price = spot_data.get("last_price")
                 prev_close = spot_data.get("prev_close_price")
+                
+                if spot_price and state.get("day_open_price") is None:
+                    state["day_open_price"] = spot_price
 
                 # FIX: Robust gap check — only abort if we have real prev_close
                 if spot_price and prev_close and prev_close > 0:
@@ -302,13 +306,20 @@ def main():
                         spot_price = spot_data.get("last_price")
                         expiry_fmt, _ = get_nearest_expiry(client)
                         if spot_price and expiry_fmt:
-                            deployed_qty = state.get("ce_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
-                            r_ce_leg, r_pe_leg = execute_strangle(client, spot_price, expiry_fmt, deployed_qty, width_pct=0.005)
-                            if r_ce_leg and r_pe_leg:
-                                state["rec_ce_leg"] = r_ce_leg
-                                state["rec_pe_leg"] = r_pe_leg
+                            divergence = abs(spot_price - state.get("day_open_price", spot_price)) / state.get("day_open_price", spot_price)
+                            if divergence > 0.010: # 1.0% Extreme Trend Filter
+                                print(f"[{datetime.now()}] [RECOVERY ABORTED] Extreme Trend Detected (Divergence: {divergence*100:.2f}% > 1.0%)")
                                 state["recovery_done"] = True
+                                state["abort_reason"] = "LOSS_BLOCKED_RECOVERY"
                                 save_state(state)
+                            else:
+                                deployed_qty = state.get("ce_leg", {}).get("qty") or (LOT_SIZE * LOT_MULTIPLIER)
+                                r_ce_leg, r_pe_leg = execute_strangle(client, spot_price, expiry_fmt, deployed_qty, width_pct=0.005)
+                                if r_ce_leg and r_pe_leg:
+                                    state["rec_ce_leg"] = r_ce_leg
+                                    state["rec_pe_leg"] = r_pe_leg
+                                    state["recovery_done"] = True
+                                    save_state(state)
                                 
                 if not state.get("aborted_for_day") or state.get("recovery_done"):
                     current_mtm = state.get("realized_pnl", 0.0)
