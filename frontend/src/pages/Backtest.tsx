@@ -142,6 +142,8 @@ export default function Backtest() {
   const [selectedBotAlgorithm, setSelectedBotAlgorithm] = useState('bot1')
   const [bot4TargetType, setBot4TargetType] = useState('fixed_1600')
   const [bot4TrendFilterPct, setBot4TrendFilterPct] = useState('1.0')
+  const [bot4RecTimedExit, setBot4RecTimedExit] = useState(true)
+  const [bot4RecTimedExitHour, setBot4RecTimedExitHour] = useState('14')
   const [botLotSize, setBotLotSize] = useState('30')
   const [applyBrokerage, setApplyBrokerage] = useState(true)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
@@ -556,7 +558,9 @@ export default function Backtest() {
       execution_mode: botExecutionMode,
       apply_brokerage: applyBrokerage,
       target_type: bot4TargetType, // Specific to Bot 4
-      trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100
+      trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100,
+      rec_timed_exit: bot4RecTimedExit,
+      rec_timed_exit_hour: Number.parseInt(bot4RecTimedExitHour)
     }
 
     setRunning(true)
@@ -1466,6 +1470,35 @@ export default function Backtest() {
                       value={bot4TrendFilterPct} 
                       onChange={(e) => setBot4TrendFilterPct(e.target.value)} 
                     />
+                  </div>
+                )}
+
+                {selectedBotAlgorithm === 'bot4' && (
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={bot4RecTimedExit}
+                        onChange={(e) => setBot4RecTimedExit(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      Recovery Timed Exit (Strategy A)
+                    </Label>
+                    {bot4RecTimedExit && (
+                      <div className="flex items-center gap-2 pl-6">
+                        <Label className="text-sm text-muted-foreground">Exit at hour:</Label>
+                        <Input
+                          type="number"
+                          min="13"
+                          max="15"
+                          step="1"
+                          value={bot4RecTimedExitHour}
+                          onChange={(e) => setBot4RecTimedExitHour(e.target.value)}
+                          className="w-20"
+                        />
+                        <span className="text-xs text-muted-foreground">:00 IST (if in loss)</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
