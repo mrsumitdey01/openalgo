@@ -73,7 +73,7 @@ GAP_ABORT_PCT      = float(os.getenv("GAP_ABORT_PCT",      "0.005"))   # skip if
 MTM_TRAIL_START_PCT = float(os.getenv("MTM_TRAIL_START_PCT", "0.0025")) # trail activates at 0.25% capital
 MTM_TRAIL_DD_PCT    = float(os.getenv("MTM_TRAIL_DD_PCT",    "0.30"))   # 30% trailing DD
 
-ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:21")
+ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:30")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
 
 PAPER_MODE  = os.getenv("PAPER_MODE", "true").lower() == "true"
@@ -144,7 +144,7 @@ def execute_straddle(client, spot, expiry_formatted, qty):
     ce_sym = f"{UNDERLYING}{expiry_formatted}{int(atm_strike)}CE"
     pe_sym = f"{UNDERLYING}{expiry_formatted}{int(atm_strike)}PE"
     
-    print(f"[{datetime.now()}] Executing 9:20 Straddle: SELL {ce_sym} & SELL {pe_sym}")
+    print(f"[{datetime.now()}] Executing 09:30 Straddle: SELL {ce_sym} & SELL {pe_sym}")
     
     try:
         if not PAPER_MODE:
@@ -183,7 +183,7 @@ def close_leg(client, leg):
     return leg
 
 def main():
-    print(f"[{datetime.now()}] Initialize Bot 4 (9:20 Short Straddle with Smart Adjustments)")
+    print(f"[{datetime.now()}] Initialize Bot 4 (09:30 Short Straddle with Smart Adjustments)")
     api_key = os.getenv("OPENALGO_API_KEY")
     client = api(api_key=api_key, host="http://127.0.0.1:5000")
     
@@ -258,10 +258,14 @@ def main():
                 
                 # --- SMART DAY-OF-WEEK TARGET SWITCHER ---
                 day_of_week = get_ist_now().weekday() # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
-                if day_of_week in [2, 3]: # Wednesday & Thursday
-                    smart_target = 350
+                
+                # NIFTY Expiry shifted to Tuesday from Sept 2025 onwards.
+                if day_of_week == 1: # Tuesday (0DTE)
+                    smart_target = 300  # 0DTE Gamma Risk - Exit Early
+                elif day_of_week == 0: # Monday (1DTE)
+                    smart_target = 500  # High Theta
                 else:
-                    smart_target = 600
+                    smart_target = 800  # 2+ DTE (Wed, Thu, Fri)
                     
                 target_profit = max(1, (deployed_qty / base_lot_size)) * smart_target
                 
@@ -364,15 +368,7 @@ def main():
                     save_state(state)
                     continue
 
-                # Smart Adjustment 3: MTM Profit Trailing
-                if state.get("peak_mtm", 0) > (dynamic_capital * MTM_TRAIL_START_PCT):
-                    if current_mtm < (state["peak_mtm"] * (1 - MTM_TRAIL_DD_PCT)):
-                        print(f"[{datetime.now()}] MTM TRAIL HIT! Current={current_mtm:.0f}, Peak={state['peak_mtm']:.0f}")
-                        if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
-                        if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
-                        state["aborted_for_day"] = True
-                        save_state(state)
-                        continue
+
 
                 # Max Daily Loss Filter (hard 2% capital cap)
                 if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
@@ -411,7 +407,7 @@ def check_signals(df_slice: pd.DataFrame, current_position: str = None) -> str:
         except Exception:
             return "HOLD"
 
-    if h == 9 and m == 21 and current_position is None:
+    if h == 9 and m == 30 and current_position is None:
         return "SHORT_STRADDLE"
     return "HOLD"
 
