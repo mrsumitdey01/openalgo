@@ -113,6 +113,7 @@ def load_state():
         "pe_leg": None,
         "rolls_done": 0,
         "max_rolls": 1,
+        "realized_pnl": 0.0,
     }
 
 def save_state(state):
@@ -194,8 +195,12 @@ def main():
             
             if past_square_off or state.get("aborted_for_day", False):
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
+                    ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                    state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
                     close_leg(client, state["ce_leg"])
                 if state["pe_leg"] and state["pe_leg"]["is_open"]:
+                    pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                    state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
                     close_leg(client, state["pe_leg"])
                 state["entry_done"] = True
                 save_state(state)
@@ -238,7 +243,7 @@ def main():
                         save_state(state)
             
             if state["entry_done"] and not state.get("aborted_for_day"):
-                current_mtm = 0
+                current_mtm = state.get("realized_pnl", 0.0)
                 
                 spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
                 current_spot = spot_data.get("last_price")
@@ -270,11 +275,14 @@ def main():
                         current_mtm += (state["ce_leg"]["entry_price"] - ce_ltp) * state["ce_leg"]["qty"]
                         if current_spot and current_spot >= state["ce_leg"]["stop_loss_spot"]:
                             print(f"[{datetime.now()}] CE STOP LOSS HIT! Spot {current_spot} >= {state['ce_leg']['stop_loss_spot']}")
+                            state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["ce_leg"]["entry_price"] - ce_ltp) * state["ce_leg"]["qty"]
                             close_leg(client, state["ce_leg"])
                             
                             # Dynamic Roll Logic
                             if state.get("rolls_done", 0) < state.get("max_rolls", 1):
                                 if state["pe_leg"] and state["pe_leg"]["is_open"]:
+                                    pe_ltp_for_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                                    state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_for_close) * state["pe_leg"]["qty"]
                                     close_leg(client, state["pe_leg"])
                                     
                                 if current_spot and expiry_fmt:
@@ -310,11 +318,14 @@ def main():
                         current_mtm += (state["pe_leg"]["entry_price"] - pe_ltp) * state["pe_leg"]["qty"]
                         if current_spot and current_spot <= state["pe_leg"]["stop_loss_spot"]:
                             print(f"[{datetime.now()}] PE STOP LOSS HIT! Spot {current_spot} <= {state['pe_leg']['stop_loss_spot']}")
+                            state["realized_pnl"] = state.get("realized_pnl", 0.0) + (state["pe_leg"]["entry_price"] - pe_ltp) * state["pe_leg"]["qty"]
                             close_leg(client, state["pe_leg"])
                             
                             # Dynamic Roll Logic
                             if state.get("rolls_done", 0) < state.get("max_rolls", 1):
                                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
+                                    ce_ltp_for_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                                    state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_for_close) * state["ce_leg"]["qty"]
                                     close_leg(client, state["ce_leg"])
                                     
                                 if current_spot and expiry_fmt:
@@ -350,8 +361,14 @@ def main():
                 # Smart Adjustment: Take Profit Target
                 if current_mtm >= target_profit:
                     print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f} (Target: {target_profit:.0f})")
-                    if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
-                    if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
+                    if state["ce_leg"] and state["ce_leg"]["is_open"]: 
+                        ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
+                        close_leg(client, state["ce_leg"])
+                    if state["pe_leg"] and state["pe_leg"]["is_open"]: 
+                        pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
+                        close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True
                     save_state(state)
                     continue
@@ -361,8 +378,14 @@ def main():
                 # Max Daily Loss Filter (hard 2% capital cap)
                 if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
                     print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
-                    if state["ce_leg"] and state["ce_leg"]["is_open"]: close_leg(client, state["ce_leg"])
-                    if state["pe_leg"] and state["pe_leg"]["is_open"]: close_leg(client, state["pe_leg"])
+                    if state["ce_leg"] and state["ce_leg"]["is_open"]: 
+                        ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
+                        close_leg(client, state["ce_leg"])
+                    if state["pe_leg"] and state["pe_leg"]["is_open"]: 
+                        pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
+                        close_leg(client, state["pe_leg"])
                     state["aborted_for_day"] = True
                     save_state(state)
                     continue
