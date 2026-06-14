@@ -1348,7 +1348,9 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         GAP_PCT = 0.005
         PROFIT_TARGET_PER_LOT = float(params.get("profit_target_amount", 1600))
         PROFIT_TARGET_PCT = float(params.get("profit_target_pct", 0.005))
-        sl_pct = 0.01
+        # Allow sweep tests to override SL without changing defaults
+        sl_pct = float(params.get("sl_pct_override", 0.01))
+        max_loss_pct = float(params.get("max_loss_pct_override", 0.02))
 
         grouped = df.groupby(df['dt'].dt.date)
 
@@ -1621,10 +1623,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 
                 # 2. Max Daily Loss Hit
-                if not aborted and not recovery_done and live_mtm < -(deployed_capital * 0.02):
+                if not aborted and not recovery_done and live_mtm < -(deployed_capital * max_loss_pct):
                     aborted = True
                     abort_reason = "LOSS"
-                    day_pnl = -(deployed_capital * 0.02) - ((ce_entry + pe_entry) * qty * 0.005)
+                    day_pnl = -(deployed_capital * max_loss_pct) - ((ce_entry + pe_entry) * qty * 0.005)
                     ce_open = pe_open = False
                     exit_datetime = dt_str
                     exit_reason = "Max Daily Loss Hit"
