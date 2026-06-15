@@ -22,7 +22,7 @@ import sys
 import time
 import json
 import traceback
-from datetime import datetime, timezone, timedelta, time as time_obj
+from datetime import datetime, timedelta, timezone, time as time_obj
 import pandas as pd
 
 from openalgo import api
@@ -123,8 +123,14 @@ def load_state():
     }
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=4)
+    state["last_heartbeat"] = datetime.now(timezone.utc).timestamp()
+    temp_file = f"{STATE_FILE}.tmp"
+    try:
+        with open(temp_file, "w") as f:
+            json.dump(state, f, indent=4)
+        os.replace(temp_file, STATE_FILE)
+    except Exception as e:
+        print(f"Error saving state atomically: {e}")
 
 def resolve_atm_strike(spot):
     return round(spot / STRIKE_INTERVAL) * STRIKE_INTERVAL
@@ -235,6 +241,29 @@ def main():
     
     state = load_state()
     print(f"[{datetime.now()}] State loaded: {state}")
+    
+    # --- REBOOT GAP CHECK (DOWNTIME RECONCILIATION) ---
+    if state.get("entry_done") and not state.get("aborted_for_day"):
+        try:
+            q = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
+            reboot_spot = q.get("last_price", 0)
+            if reboot_spot > 0:
+                print(f"[{datetime.now()}] REBOOT RECONCILIATION: Spot={reboot_spot}")
+                for leg_key in ["ce_leg", "pe_leg", "rec_ce_leg", "rec_pe_leg"]:
+                    leg = state.get(leg_key)
+                    if leg and leg.get("is_open"):
+                        if (reboot_spot >= leg["stop_loss_spot"] and "CE" in leg["symbol"]) or \
+                           (reboot_spot <= leg["stop_loss_spot"] and "PE" in leg["symbol"]):
+                            print(f"[CRITICAL] DOWNTIME GAP ABORT: {leg['symbol']} SL breached during downtime!")
+                            # Force close immediately at current market to avoid further slippage
+                            leg_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=leg["symbol"]).get("last_price", leg["entry_price"])
+                            state["realized_pnl"] = state.get("realized_pnl", 0.0) + (leg["entry_price"] - leg_ltp) * leg["qty"]
+                            close_leg(client, leg)
+                            state["aborted_for_day"] = True
+                            state["abort_reason"] = "DOWNTIME_GAP_ABORT"
+                save_state(state)
+        except Exception as e:
+            print(f"Reboot gap check failed: {e}")
     
     while True:
         try:
@@ -545,6 +574,8 @@ def main():
                         save_state(state)
                         continue
                         
+            # Update heartbeat every loop
+            save_state(state)
             time.sleep(2.5)
             
         except Exception as e:

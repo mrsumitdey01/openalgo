@@ -1,0 +1,19 @@
+{
+    "date": "2026-06-16",
+    "entry_done": false,
+    "aborted_for_day": false,
+    "peak_mtm": 0.0,
+    "be_locked": false,
+    "ce_leg": null,
+    "pe_leg": null,
+    "rolls_done": 0,
+    "max_rolls": 1,
+    "realized_pnl": 0.0,
+    "abort_reason": null,
+    "recovery_done": false,
+    "recovery_timed_exit_done": false,
+    "rec_ce_leg": null,
+    "rec_pe_leg": null,
+    "day_open_price": null,
+    "last_heartbeat": 1781549849.98907
+}

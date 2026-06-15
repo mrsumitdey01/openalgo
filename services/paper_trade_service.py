@@ -549,6 +549,9 @@ def get_paper_trade_status() -> dict:
                     status = "Live Monitoring (External Daemon)"
                     if b4.get("aborted_for_day"):
                         status = f"Stopped ({b4.get('abort_reason', 'EOD')})"
+                    elif "last_heartbeat" in b4:
+                        if time.time() - b4["last_heartbeat"] > 10:
+                            status = "CRITICAL: Daemon Disconnected"
                         
                     bot4_pnl = b4.get("realized_pnl", 0.0)
                     bot4_trades = []
