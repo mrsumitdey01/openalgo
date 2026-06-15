@@ -1921,7 +1921,7 @@ function PaperTradePanel() {
                           ) : acc.status === 'no_data' ? (
                             <Badge variant="secondary">No Data</Badge>
                           ) : (
-                            <Badge variant="secondary">Pending</Badge>
+                            <Badge variant="secondary" className="max-w-[120px] truncate" title={acc.status}>{acc.status === 'pending' ? 'Pending' : acc.status}</Badge>
                           )}
                         </TableCell>
                       </TableRow>

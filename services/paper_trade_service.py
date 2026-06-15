@@ -41,15 +41,18 @@ PAPER_ACCOUNTS = []
 
 # NSE accounts
 for bot in ["bot1", "bot2", "bot3", "bot4"]:
+    symbol = "NIFTY" if bot == "bot4" else "BANKNIFTY"
+    lot_size = 65 if bot == "bot4" else 30
+    capital = 185000.0 if bot == "bot4" else 800000.0
     for mode in ["futures", "options_buying", "options_selling", "options_spread"]:
         PAPER_ACCOUNTS.append({
             "bot": bot,
             "exchange": "NSE",
-            "symbol": "BANKNIFTY",
+            "symbol": symbol,
             "db_exchange": "NSE_INDEX",
             "execution_mode": mode,
-            "lot_size": 30,
-            "capital": 800000.0,
+            "lot_size": lot_size,
+            "capital": capital,
         })
 
 # MCX accounts
@@ -529,6 +532,68 @@ def get_paper_trade_status() -> dict:
                 "has_open_position": acc_data.get("open_position") is not None,
                 "open_position": acc_data.get("open_position")
             })
+
+        # --- DYNAMIC INJECTION: BOT 4 LIVE SYNC ---
+        import os, json
+        bot4_state_file = os.path.join(os.getcwd(), "bot4_strategy_state.json")
+        if os.path.exists(bot4_state_file):
+            try:
+                with open(bot4_state_file, "r") as f:
+                    b4 = json.load(f)
+                
+                # Only inject if today's date matches (otherwise it's stale)
+                if b4.get("date") == datetime.now().strftime("%Y-%m-%d"):
+                    # Remove generic Bot 4 placeholders
+                    accounts_list = [a for a in accounts_list if a.get("bot") != "bot4"]
+                    
+                    status = "Live Monitoring (External Daemon)"
+                    if b4.get("aborted_for_day"):
+                        status = f"Stopped ({b4.get('abort_reason', 'EOD')})"
+                        
+                    bot4_pnl = b4.get("realized_pnl", 0.0)
+                    bot4_trades = []
+                    bot4_open = None
+                    has_open = False
+                    
+                    for leg_key in ["ce_leg", "pe_leg", "rec_ce_leg", "rec_pe_leg"]:
+                        leg = b4.get(leg_key)
+                        if leg:
+                            if leg.get("is_open"):
+                                has_open = True
+                                bot4_open = {
+                                    "type": "SHORT",
+                                    "qty": leg.get("qty", 65),
+                                    "entry_spot": leg.get("ref_spot", 0),
+                                    "entry_spread": leg.get("entry_price", 0),
+                                    "margin_blocked": 185000,
+                                }
+                            else:
+                                bot4_trades.append({
+                                    "direction": "SHORT_LEG",
+                                    "qty": leg.get("qty", 65),
+                                    "entry_price": round(leg.get("entry_price", 0), 2),
+                                    "exit_price": 0.0,
+                                    "net_pnl": 0.0,
+                                    "exit_reason": "SL / Closed"
+                                })
+                                
+                    accounts_list.append({
+                        "account_id": "bot4_NSE_NIFTY_options_selling_live",
+                        "bot": "bot4",
+                        "exchange": "NSE",
+                        "symbol": "NIFTY",
+                        "execution_mode": "options_selling",
+                        "status": status,
+                        "error": None,
+                        "metrics": _empty_metrics(185000.0),
+                        "trades": bot4_trades,
+                        "has_open_position": has_open,
+                        "open_position": bot4_open
+                    })
+                    accounts_list[-1]["metrics"]["net_pnl"] = round(bot4_pnl, 2)
+                    accounts_list[-1]["metrics"]["final_capital"] = 185000.0 + round(bot4_pnl, 2)
+            except Exception as e:
+                logger.error(f"Error injecting Bot 4 state: {e}")
 
         accounts_list.sort(
             key=lambda a: a.get("metrics", {}).get("net_pnl", 0),
