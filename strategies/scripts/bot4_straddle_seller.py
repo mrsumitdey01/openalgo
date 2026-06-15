@@ -52,7 +52,7 @@ LOT_MULTIPLIER = int(os.getenv("LOT_MULTIPLIER", "1"))
 STRIKE_INTERVAL = int(os.getenv("STRIKE_INTERVAL", str(_get_default_param("STRIKE_INTERVAL", UNDERLYING))))
 
 def get_deployed_capital(symbol, qty):
-    margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 160000)
+    margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else (185000 if symbol == "NIFTY" else 160000))
     base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
     return max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
 

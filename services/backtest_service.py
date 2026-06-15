@@ -1426,7 +1426,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             qty = qty_param
             
             # Calculate Deployed Capital for MTM targets based on lot size
-            margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else 160000)
+            margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else (185000 if symbol == "NIFTY" else 160000))
             base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
             deployed_capital = max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
             
