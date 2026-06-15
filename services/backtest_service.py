@@ -1354,7 +1354,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         
         # ---- Loss-Reduction Strategies (backtest-only params) ----
         # Strategy A: Exit recovery at 14:00 if still in loss
-        rec_timed_exit = params.get("rec_timed_exit", False)
+        rec_timed_exit = str(params.get("rec_timed_exit", "true")).lower() == "true"
         rec_timed_exit_hour = int(params.get("rec_timed_exit_hour", 14))
         # Strategy B: Trailing SL on recovery once in profit by rec_trail_trigger Rs
         rec_trailing_sl = params.get("rec_trailing_sl", False)
