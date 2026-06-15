@@ -161,6 +161,14 @@ export default function Backtest() {
   const [slippage, setSlippage] = useState('0.05')
   const [commissionFlat, setCommissionFlat] = useState('20')
   const [commissionPct, setCommissionPct] = useState('0.03')
+  
+  // Apply Bot 4 default constraints
+  useEffect(() => {
+    if (selectedBotAlgorithm === 'bot4') {
+      setCapital('185000')
+      setBotLotSize('65')
+    }
+  }, [selectedBotAlgorithm])
 
   // Strategy specific parameter inputs
   const [fastPeriod, setFastPeriod] = useState('9')

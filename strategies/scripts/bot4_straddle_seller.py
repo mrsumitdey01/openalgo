@@ -220,6 +220,11 @@ def close_leg(client, leg):
             client.placeorder(strategy=STRATEGY_NAME, symbol=leg['symbol'], action="BUY", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=leg['qty'])
         except Exception as e:
             print(f"Error closing leg: {e}")
+            
+        if "hedge_symbol" in leg:
+            pass # Removed Iron Condor logic
+
+                
     leg["is_open"] = False
     return leg
 
