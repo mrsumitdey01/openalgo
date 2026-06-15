@@ -72,7 +72,7 @@ ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:30")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
 
 PAPER_MODE  = os.getenv("PAPER_MODE", "true").lower() == "true"
-STATE_FILE  = "bot4_strategy_state.json"
+STATE_FILE  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bot4_strategy_state.json"))
 
 IST = timezone(timedelta(hours=5, minutes=30))
 

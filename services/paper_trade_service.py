@@ -535,7 +535,7 @@ def get_paper_trade_status() -> dict:
 
         # --- DYNAMIC INJECTION: BOT 4 LIVE SYNC ---
         import os, json
-        bot4_state_file = os.path.join(os.getcwd(), "bot4_strategy_state.json")
+        bot4_state_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bot4_strategy_state.json"))
         if os.path.exists(bot4_state_file):
             try:
                 with open(bot4_state_file, "r") as f:
