@@ -128,7 +128,14 @@ def save_state(state):
     try:
         with open(temp_file, "w") as f:
             json.dump(state, f, indent=4)
-        os.replace(temp_file, STATE_FILE)
+            
+        # Micro-retry loop to bypass Windows file-lock collisions during Flask reads
+        for attempt in range(10):
+            try:
+                os.replace(temp_file, STATE_FILE)
+                break
+            except PermissionError:
+                time.sleep(0.02)
     except Exception as e:
         print(f"Error saving state atomically: {e}")
 
