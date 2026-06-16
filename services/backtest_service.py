@@ -1402,6 +1402,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         GAP_PCT = 0.005
         PROFIT_TARGET_PER_LOT = float(params.get("profit_target_amount", 1600))
         PROFIT_TARGET_PCT = float(params.get("profit_target_pct", 0.005))
+        profit_targets = params.get("profit_targets", {})
         # Allow sweep tests to override SL without changing defaults
         sl_pct = float(params.get("sl_pct_override", 0.01))
         max_loss_pct = float(params.get("max_loss_pct_override", 0.02))
@@ -1520,6 +1521,9 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
             if target_type == "fixed_1600":
                 target_profit = max(1, (qty / base_lot_size)) * smart_target
+            elif target_type == "dynamic_day_based" and profit_targets:
+                day_target_pct = float(profit_targets.get(day_name, PROFIT_TARGET_PCT))
+                target_profit = deployed_capital * day_target_pct
             else:
                 target_profit = deployed_capital * PROFIT_TARGET_PCT
 
