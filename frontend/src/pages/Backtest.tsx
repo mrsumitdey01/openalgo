@@ -568,7 +568,14 @@ export default function Backtest() {
       target_type: bot4TargetType, // Specific to Bot 4
       trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100,
       rec_timed_exit: bot4RecTimedExit,
-      rec_timed_exit_hour: Number.parseInt(bot4RecTimedExitHour)
+      rec_timed_exit_hour: Number.parseInt(bot4RecTimedExitHour),
+      profit_targets: bot4TargetType === 'dynamic_day_based' ? {
+        "Monday": 0.008,
+        "Tuesday": 0.009,
+        "Wednesday": 0.009,
+        "Thursday": 0.010,
+        "Friday": 0.006
+      } : undefined
     }
 
     setRunning(true)
