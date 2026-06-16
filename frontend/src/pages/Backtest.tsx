@@ -1920,6 +1920,16 @@ function PaperTradePanel() {
                             <Badge variant="destructive">Error</Badge>
                           ) : acc.status === 'no_data' ? (
                             <Badge variant="secondary">No Data</Badge>
+                          ) : acc.status?.startsWith('CRITICAL') ? (
+                            <Badge variant="destructive" title={acc.status}>⚠ Disconnected</Badge>
+                          ) : acc.status?.startsWith('Stopped') ? (
+                            <Badge variant="outline" className="border-blue-500 text-blue-400" title={acc.status}>
+                              {acc.status.replace('Stopped (', '').replace(')', '') || 'Stopped'}
+                            </Badge>
+                          ) : acc.status?.startsWith('Daemon Offline') ? (
+                            <Badge variant="secondary" title={acc.status}>Offline (Mkt Closed)</Badge>
+                          ) : acc.status?.startsWith('Live Monitoring') ? (
+                            <Badge variant="outline" className="border-green-500 text-green-400" title={acc.status}>● Live</Badge>
                           ) : (
                             <Badge variant="secondary" className="max-w-[120px] truncate" title={acc.status}>{acc.status === 'pending' ? 'Pending' : acc.status}</Badge>
                           )}

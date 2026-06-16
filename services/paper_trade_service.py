@@ -536,28 +536,105 @@ def get_paper_trade_status() -> dict:
         # --- DYNAMIC INJECTION: BOT 4 LIVE SYNC ---
         import os, json
         bot4_state_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bot4_strategy_state.json"))
+        bot4_log_file   = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bot4_daily_log.json"))
         if os.path.exists(bot4_state_file):
             try:
                 with open(bot4_state_file, "r") as f:
                     b4 = json.load(f)
-                
+
                 # Only inject if today's date matches (otherwise it's stale)
                 if b4.get("date") == datetime.now().strftime("%Y-%m-%d"):
-                    # Remove generic Bot 4 placeholders
+                    # Remove generic Bot 4 placeholders added by the paper engine
                     accounts_list = [a for a in accounts_list if a.get("bot") != "bot4"]
-                    
+
+                    # ── Status label ────────────────────────────────────────
                     status = "Live Monitoring (External Daemon)"
                     if b4.get("aborted_for_day"):
-                        status = f"Stopped ({b4.get('abort_reason', 'EOD')})"
+                        abort_reason = b4.get("abort_reason", "EOD")
+                        status = f"Stopped ({abort_reason})"
                     elif "last_heartbeat" in b4:
-                        if time.time() - b4["last_heartbeat"] > 10:
+                        if time.time() - b4["last_heartbeat"] > 60:
+                            status = "Daemon Offline (Market Closed)"
+                        elif time.time() - b4["last_heartbeat"] > 10:
                             status = "CRITICAL: Daemon Disconnected"
-                        
-                    bot4_pnl = b4.get("realized_pnl", 0.0)
+
+                    # ── Daily log: load ─────────────────────────────────────
+                    daily_log = []
+                    if os.path.exists(bot4_log_file):
+                        try:
+                            with open(bot4_log_file, "r") as lf:
+                                daily_log = json.load(lf)
+                        except Exception:
+                            daily_log = []
+
+                    # ── Daily log: record today if session is complete ───────
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    today_logged = any(r["date"] == today_str for r in daily_log)
+                    if b4.get("aborted_for_day") and not today_logged:
+                        today_pnl = round(b4.get("realized_pnl", 0.0), 2)
+                        daily_log.append({
+                            "date": today_str,
+                            "pnl": today_pnl,
+                            "win": today_pnl > 0,
+                            "abort_reason": b4.get("abort_reason", "EOD"),
+                        })
+                        try:
+                            with open(bot4_log_file, "w") as lf:
+                                json.dump(daily_log, lf, indent=2)
+                        except Exception as save_err:
+                            logger.warning(f"Bot4 daily log save failed: {save_err}")
+
+                    # ── Cumulative metrics from log ──────────────────────────
+                    CAPITAL = 185000.0
+                    log_pnl_total   = sum(r["pnl"] for r in daily_log)
+                    total_trades    = len(daily_log)
+                    winning_trades  = sum(1 for r in daily_log if r["win"])
+                    losing_trades   = total_trades - winning_trades
+                    win_rate        = (winning_trades / total_trades * 100.0) if total_trades > 0 else 0.0
+                    gross_profit    = sum(r["pnl"] for r in daily_log if r["pnl"] > 0)
+                    gross_loss      = sum(r["pnl"] for r in daily_log if r["pnl"] < 0)
+                    profit_factor   = (gross_profit / abs(gross_loss)) if gross_loss != 0 else (gross_profit if gross_profit > 0 else 0.0)
+
+                    # Running drawdown calculation
+                    running = CAPITAL
+                    peak    = CAPITAL
+                    max_dd  = 0.0
+                    for r in daily_log:
+                        running += r["pnl"]
+                        if running > peak:
+                            peak = running
+                        dd = (peak - running) / peak * 100.0 if peak > 0 else 0.0
+                        if dd > max_dd:
+                            max_dd = dd
+
+                    # Add today's live intraday PnL if today isn't completed yet
+                    intraday_pnl = b4.get("realized_pnl", 0.0) if not b4.get("aborted_for_day") else 0.0
+                    net_pnl_total = log_pnl_total + intraday_pnl
+
+                    avg_trade = (log_pnl_total / total_trades) if total_trades > 0 else 0.0
+                    roi       = (net_pnl_total / CAPITAL) * 100.0
+
+                    cumulative_metrics = {
+                        "initial_capital":  round(CAPITAL, 2),
+                        "final_capital":    round(CAPITAL + net_pnl_total, 2),
+                        "net_pnl":          round(net_pnl_total, 2),
+                        "roi_pct":          round(roi, 2),
+                        "total_trades":     total_trades,
+                        "win_rate_pct":     round(win_rate, 2),
+                        "winning_trades":   winning_trades,
+                        "losing_trades":    losing_trades,
+                        "profit_factor":    round(profit_factor, 2),
+                        "max_drawdown_pct": round(max_dd, 2),
+                        "avg_trade_pnl":    round(avg_trade, 2),
+                        "profitable_days":  winning_trades,
+                        "total_days":       total_trades,
+                    }
+
+                    # ── Open legs ────────────────────────────────────────────
                     bot4_trades = []
-                    bot4_open = None
-                    has_open = False
-                    
+                    bot4_open   = None
+                    has_open    = False
+
                     for leg_key in ["ce_leg", "pe_leg", "rec_ce_leg", "rec_pe_leg"]:
                         leg = b4.get(leg_key)
                         if leg:
@@ -572,29 +649,27 @@ def get_paper_trade_status() -> dict:
                                 }
                             else:
                                 bot4_trades.append({
-                                    "direction": "SHORT_LEG",
-                                    "qty": leg.get("qty", 65),
+                                    "direction":   "SHORT_LEG",
+                                    "qty":         leg.get("qty", 65),
                                     "entry_price": round(leg.get("entry_price", 0), 2),
-                                    "exit_price": 0.0,
-                                    "net_pnl": 0.0,
+                                    "exit_price":  0.0,
+                                    "net_pnl":     0.0,
                                     "exit_reason": "SL / Closed"
                                 })
-                                
+
                     accounts_list.append({
-                        "account_id": "bot4_NSE_NIFTY_options_selling_live",
-                        "bot": "bot4",
-                        "exchange": "NSE",
-                        "symbol": "NIFTY",
-                        "execution_mode": "options_selling",
-                        "status": status,
-                        "error": None,
-                        "metrics": _empty_metrics(185000.0),
-                        "trades": bot4_trades,
+                        "account_id":      "bot4_NSE_NIFTY_options_selling_live",
+                        "bot":             "bot4",
+                        "exchange":        "NSE",
+                        "symbol":          "NIFTY",
+                        "execution_mode":  "options_selling",
+                        "status":          status,
+                        "error":           None,
+                        "metrics":         cumulative_metrics,
+                        "trades":          bot4_trades,
                         "has_open_position": has_open,
-                        "open_position": bot4_open
+                        "open_position":   bot4_open,
                     })
-                    accounts_list[-1]["metrics"]["net_pnl"] = round(bot4_pnl, 2)
-                    accounts_list[-1]["metrics"]["final_capital"] = 185000.0 + round(bot4_pnl, 2)
             except Exception as e:
                 logger.error(f"Error injecting Bot 4 state: {e}")
 
