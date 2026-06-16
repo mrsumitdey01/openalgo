@@ -1,6 +1,6 @@
 {
     "date": "2026-06-16",
-    "entry_done": false,
+    "entry_done": true,
     "aborted_for_day": false,
     "peak_mtm": 0.0,
     "be_locked": false,
@@ -15,5 +15,5 @@
     "rec_ce_leg": null,
     "rec_pe_leg": null,
     "day_open_price": null,
-    "last_heartbeat": 1781550276.468004
+    "last_heartbeat": 1781623678.224767
 }

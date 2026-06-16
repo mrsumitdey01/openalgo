@@ -49,6 +49,60 @@ def calculate_macd(series: pd.Series, fast_period: int = 12, slow_period: int = 
     macd_hist = macd_line - signal_line
     return macd_line, signal_line, macd_hist
 
+class HullBBI:
+    def __init__(self, length=21):
+        self.length = length
+        self.half_len = round(self.length / 2)
+        self.sqrt_len = round(math.sqrt(self.length))
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        close = df["close"].astype(float)
+        wma_half = self._wma(close, self.half_len)
+        wma_full = self._wma(close, self.length)
+        diff = 2.0 * wma_half - wma_full
+        hma = self._wma(diff, self.sqrt_len)
+        df["hma"] = hma
+        df["hma_prev"] = hma.shift(1)
+        df["hma_bullish"] = hma > hma.shift(1)
+        df["hma_bearish"] = hma < hma.shift(1)
+        return df
+
+    @staticmethod
+    def _wma(series: pd.Series, period: int) -> pd.Series:
+        weights = np.arange(1, period + 1, dtype=np.float64)
+        weight_sum = weights.sum()
+        return series.rolling(window=period, min_periods=period).apply(
+            lambda x: np.dot(x, weights) / weight_sum,
+            raw=True,
+        )
+
+class DTCRibbon:
+    def __init__(self, lengths=[8, 13, 21, 26, 34, 40]):
+        self.lengths = lengths
+
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
+        close = df["close"].astype(float)
+        ema_col_names = []
+        for length in self.lengths:
+            col = f"ema_{length}"
+            df[col] = close.ewm(span=length, adjust=False).mean()
+            ema_col_names.append(col)
+
+        ema_matrix = df[ema_col_names]
+        df["ribbon_max"] = ema_matrix.max(axis=1)
+        df["ribbon_min"] = ema_matrix.min(axis=1)
+
+        bullish = pd.Series(True, index=df.index)
+        bearish = pd.Series(True, index=df.index)
+        for i in range(len(ema_col_names) - 1):
+            bullish = bullish & (df[ema_col_names[i]] > df[ema_col_names[i + 1]])
+            bearish = bearish & (df[ema_col_names[i]] < df[ema_col_names[i + 1]])
+
+        df["ribbon_bullish"] = bullish
+        df["ribbon_bearish"] = bearish
+        return df
+
+
 
 def run_backtest(params: dict) -> tuple[bool, dict, int]:
     """
@@ -1397,6 +1451,9 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         
         prev_close = None
 
+        hull_bbi = HullBBI()
+        dtc_ribbon = DTCRibbon()
+
         for date, day_df in grouped:
             if len(day_df) < 200:
                 if len(day_df) > 0:
@@ -1405,6 +1462,16 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 for _ in range(len(day_df)):
                     capital_history.append(current_capital)
                 continue
+                
+            # Precompute indicators for the day
+            day_df = hull_bbi.compute(day_df)
+            day_df = dtc_ribbon.compute(day_df)
+            day_df['tr0'] = abs(day_df['high'] - day_df['low'])
+            day_df['tr1'] = abs(day_df['high'] - day_df['close'].shift(1))
+            day_df['tr2'] = abs(day_df['low'] - day_df['close'].shift(1))
+            day_df['tr'] = day_df[['tr0', 'tr1', 'tr2']].max(axis=1)
+            day_df['atr'] = day_df['tr'].rolling(14).mean()
+            day_df['vol_ma'] = day_df['volume'].rolling(20).mean()
 
             day_open = float(day_df.iloc[0]['open'])
             day_close = float(day_df.iloc[-1]['close'])
@@ -1478,6 +1545,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
             rec_ce_ref_spot = rec_pe_ref_spot = None
             rec_ce_strike = rec_pe_strike = None
             rec_ce_sl = rec_pe_sl = None
+            rec_direction = None
             
             day_open_price = None
             
@@ -1551,26 +1619,23 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                         divergence = abs(price - day_open_price) / day_open_price if day_open_price else 0
                         
                         if divergence > trend_filter_pct:
-                            # Do not deploy recovery, accept morning loss
                             aborted = True
                             exit_reason = "Loss (Extreme Trend Blocked Recovery)"
                         else:
-                            aborted = False  # Un-abort to let recovery run
+                            aborted = False
                             rec_ce_open = True
                             rec_pe_open = True
-                            
                             rec_entry_spot = price
                             rec_ce_strike = rec_entry_spot * 1.005
                             rec_pe_strike = rec_entry_spot * 0.995
-                            rec_ce_entry = rec_entry_spot * 0.005 * 0.999 # Synthetic premium 0.5%
+                            rec_ce_entry = rec_entry_spot * 0.005 * 0.999
                             rec_pe_entry = rec_entry_spot * 0.005 * 0.999
                             rec_ce_ref_spot = rec_entry_spot
                             rec_pe_ref_spot = rec_entry_spot
                             rec_ce_sl = rec_entry_spot * (1 + rec_sl_pct)
                             rec_pe_sl = rec_entry_spot * (1 - rec_sl_pct)
-                            rec_trail_peak = 0.0  # for trailing SL tracking
+                            rec_trail_peak = 0.0
                             rec_trail_sl_activated = False
-                            
                             total_legs_traded += 2
                         
                 if aborted:
@@ -1618,30 +1683,46 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 # Recovery PnL Tracking
                 rec_ce_mtm = 0.0
-                if rec_ce_open and price > rec_ce_strike:
-                    rec_ce_mtm = -(price - rec_ce_strike) * qty
+                if rec_ce_open:
+                    if rec_direction == "LONG_CALL":
+                        if price > rec_ce_strike:
+                            rec_ce_mtm = (price - rec_ce_strike) * qty # Buyer gains
+                    else:
+                        if price > rec_ce_strike:
+                            rec_ce_mtm = -(price - rec_ce_strike) * qty # Seller loses
+
                 rec_pe_mtm = 0.0
-                if rec_pe_open and price < rec_pe_strike:
-                    rec_pe_mtm = (rec_pe_strike - price) * qty
-                    
+                if rec_pe_open:
+                    if rec_direction == "LONG_PUT":
+                        if price < rec_pe_strike:
+                            rec_pe_mtm = (rec_pe_strike - price) * qty # Buyer gains
+                    else:
+                        if price < rec_pe_strike:
+                            rec_pe_mtm = -(rec_pe_strike - price) * qty # Seller loses
+                            
                 rec_sim_options_pnl = 0.0
                 if rec_ce_open or rec_pe_open:
                     rec_mins_held = max(0, (t.hour * 60 + t.minute) - (12 * 60 + 30))
-                    rec_theta_profit = (rec_mins_held / 180.0) * ((rec_ce_entry + rec_pe_entry) * qty * 0.20)
                     
-                    rec_divergence_pct = abs(price - rec_entry_spot) / rec_entry_spot if rec_entry_spot > 0 else 0
-                    rec_gamma_loss = (rec_divergence_pct / 0.01) * ((rec_ce_entry + rec_pe_entry) * qty * 0.15)
-                    
-                    rec_sim_options_pnl = rec_theta_profit - rec_gamma_loss
-                    
-                    rec_open_ratio = (1 if rec_ce_open else 0) + (1 if rec_pe_open else 0)
-                    rec_sim_options_pnl = rec_sim_options_pnl * (rec_open_ratio / 2.0)
+                    if rec_direction in ["LONG_CALL", "LONG_PUT"]:
+                        entry_prem = rec_ce_entry if rec_ce_open else rec_pe_entry
+                        rec_theta_loss = (rec_mins_held / 180.0) * (entry_prem * qty * 0.20)
+                        rec_divergence_pct = abs(price - rec_entry_spot) / rec_entry_spot if rec_entry_spot > 0 else 0
+                        rec_gamma_profit = (rec_divergence_pct / 0.01) * (entry_prem * qty * 0.15)
+                        rec_sim_options_pnl = rec_gamma_profit - rec_theta_loss
+                    else:
+                        rec_theta_profit = (rec_mins_held / 180.0) * ((rec_ce_entry + rec_pe_entry) * qty * 0.20)
+                        rec_divergence_pct = abs(price - rec_entry_spot) / rec_entry_spot if rec_entry_spot > 0 else 0
+                        rec_gamma_loss = (rec_divergence_pct / 0.01) * ((rec_ce_entry + rec_pe_entry) * qty * 0.15)
+                        rec_sim_options_pnl = rec_theta_profit - rec_gamma_loss
+                        
+                        rec_open_ratio = (1 if rec_ce_open else 0) + (1 if rec_pe_open else 0)
+                        rec_sim_options_pnl = rec_sim_options_pnl * (rec_open_ratio / 2.0)
 
                 # ---------------------------------------------------------------------------------
                 live_mtm = day_pnl + ce_mtm + pe_mtm + simulated_options_pnl + rec_ce_mtm + rec_pe_mtm + rec_sim_options_pnl
                 
 
-                
                 # ---- Strategy A: Recovery Timed Exit ----
                 if rec_timed_exit and recovery_done and not aborted and (rec_ce_open or rec_pe_open):
                     if t.hour >= rec_timed_exit_hour:
