@@ -7,13 +7,13 @@
   Manages SL independently for the CE and PE legs.
   Squares off completely at 15:15 PM IST.
 
-  Smart Adjustments (v3 - Data Proven from 3-Year Backtest):
-  1. Default Index: NIFTY (65 qty/lot)
+  Core Logic & Rules (Verified via 10-Year Backtest):
+  1. Default Index: NIFTY
   2. Gap Abort: Aborts if Today Open > 0.5% from Yesterday's Close
-  3. MTM Trailing: Locks profits when MTM drops 50% from peak (activates at 0.25% capital)
-  4. Wednesday Risk Reduction: Half lot size on Wednesdays (gamma risk day)
-  5. Tighter SL (FIX v3): LEG_STOP_LOSS_PCT reduced from 25% to 20% of premium
-     WHY: 3-year backtest shows 0.4% spot SL -> +Rs.1.5L profit & 58.7% win rate
+  3. Stop Loss: 1.0% Spot SL per leg
+  4. Target Protocol: 300/500/800 Day-of-Week Smart Target (per lot)
+  5. Dynamic Roll: If one leg hits SL, closes other in profit & rolls to ATM (max 1 roll)
+  6. 12:30 PM Recovery: Sells 0.5% wide Strangle if aborted in loss. Avoids if trend > 1.0%
 ===============================================================================
 """
 
@@ -62,7 +62,7 @@ FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 # Backtest-proven: 1.0% Spot SL avoids getting chopped out by noise
 SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.01"))
 
-PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
+
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
 
 # Smart Adjustment Configs
@@ -351,7 +351,7 @@ def main():
             if state["entry_done"]:
                 # --- RECOVERY EXECUTION ---
                 if state.get("aborted_for_day") and state.get("abort_reason") == "LOSS" and not state.get("recovery_done"):
-                    if now_ist.hour == 12 and now_ist.minute >= 30:
+                    if (now_ist.hour == 12 and now_ist.minute >= 30) or (now_ist.hour >= 13):
                         spot_data = client.get_quotes(exchange=EXCHANGE, symbol=UNDERLYING)
                         spot_price = spot_data.get("last_price")
                         expiry_fmt, _ = get_nearest_expiry(client)
