@@ -573,21 +573,29 @@ def main():
                     continue
 
                 # Max Daily Loss Filter (hard 2% capital cap)
-                if not state.get("recovery_done"):
-                    if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
-                        print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
-                        if state.get("ce_leg") and state["ce_leg"]["is_open"]: 
-                            ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
-                            state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
-                            close_leg(client, state["ce_leg"])
-                        if state.get("pe_leg") and state["pe_leg"]["is_open"]: 
-                            pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
-                            state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
-                            close_leg(client, state["pe_leg"])
-                        state["aborted_for_day"] = True
-                        state["abort_reason"] = "LOSS"
-                        save_state(state)
-                        continue
+                if current_mtm < -(dynamic_capital * MAX_MTM_LOSS_PCT):
+                    print(f"[{datetime.now()}] MAX LOSS HIT! MTM={current_mtm:.0f}, Cap={-(dynamic_capital*MAX_MTM_LOSS_PCT):.0f}")
+                    if state.get("ce_leg") and state["ce_leg"]["is_open"]: 
+                        ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
+                        close_leg(client, state["ce_leg"])
+                    if state.get("pe_leg") and state["pe_leg"]["is_open"]: 
+                        pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
+                        close_leg(client, state["pe_leg"])
+                    # Also close recovery legs if open
+                    if state.get("rec_ce_leg") and state["rec_ce_leg"]["is_open"]: 
+                        r_ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_ce_leg"]["symbol"]).get("last_price", state["rec_ce_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["rec_ce_leg"]["entry_price"] - r_ce_ltp_close) * state["rec_ce_leg"]["qty"]
+                        close_leg(client, state["rec_ce_leg"])
+                    if state.get("rec_pe_leg") and state["rec_pe_leg"]["is_open"]: 
+                        r_pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_pe_leg"]["symbol"]).get("last_price", state["rec_pe_leg"]["entry_price"])
+                        state["realized_pnl"] += (state["rec_pe_leg"]["entry_price"] - r_pe_ltp_close) * state["rec_pe_leg"]["qty"]
+                        close_leg(client, state["rec_pe_leg"])
+                    state["aborted_for_day"] = True
+                    state["abort_reason"] = "MAX_LOSS"
+                    save_state(state)
+                    continue
                         
             # Update heartbeat every loop
             save_state(state)
