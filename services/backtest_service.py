@@ -1402,9 +1402,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         GAP_PCT = 0.005
         PROFIT_TARGET_PER_LOT = float(params.get("profit_target_amount", 1600))
         PROFIT_TARGET_PCT = float(params.get("profit_target_pct", 0.005))
-        # Allow sweep tests to override SL without changing defaults
-        sl_pct = float(params.get("sl_pct_override", 0.01))
-        max_loss_pct = float(params.get("max_loss_pct_override", 0.02))
+        
+        # Spot SL overrides, defaults to Bot 4's 1% SL and 2% Max Loss
+        sl_pct = float(params.get("sl_pct", 0.01))
+        max_loss_pct = float(params.get("max_loss_pct", 0.02))
         
         # ---- Loss-Reduction Strategies (backtest-only params) ----
         # Strategy A: Exit recovery at 14:00 if still in loss
@@ -1414,7 +1415,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
         rec_trailing_sl = params.get("rec_trailing_sl", False)
         rec_trail_trigger = float(params.get("rec_trail_trigger", 500))
         # Strategy C: Tighter recovery SL pct (default same as morning sl_pct)
-        rec_sl_pct = float(params.get("rec_sl_pct_override", 0.01))
+        rec_sl_pct = float(params.get("rec_sl_pct", 0.01))
         # Strategy D/E: Skip certain days
         skip_friday = params.get("skip_friday", False)
         skip_thursday = params.get("skip_thursday", False)
@@ -1573,10 +1574,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 dt_str = str(row['dt'])
                 open_px = float(row['open'])
                 
-                if day_open_price is None and t.hour == 9 and t.minute >= 15:
-                    day_open_price = open_px
-
                 if t.hour == 9 and t.minute == 30 and not ce_open and not pe_open and not aborted:
+                    if day_open_price is None:
+                        day_open_price = price
+                        
                     spot_at_entry = price
                     ce_ref_spot = price
                     pe_ref_spot = price
@@ -1636,7 +1637,7 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                             rec_pe_sl = rec_entry_spot * (1 - rec_sl_pct)
                             rec_trail_peak = 0.0
                             rec_trail_sl_activated = False
-                            total_legs_traded += 2
+                            total_legs_traded += 4
                         
                 if aborted:
                     capital_history.append(current_capital + day_pnl)
@@ -1822,7 +1823,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
                 if not aborted and live_mtm >= target_profit:
                     aborted = True
                     abort_reason = "PROFIT"
-                    day_pnl = live_mtm - ((ce_entry + pe_entry) * qty * 0.001) # exit slippage
+                    if recovery_done:
+                        day_pnl = live_mtm - ((rec_ce_entry + rec_pe_entry) * qty * 0.001) # exit slippage for recovery legs
+                    else:
+                        day_pnl = live_mtm - ((ce_entry + pe_entry) * qty * 0.001) # exit slippage for morning legs
                     ce_open = pe_open = False
                     rec_ce_open = rec_pe_open = False
                     exit_datetime = dt_str
@@ -1835,7 +1839,10 @@ def run_bot4_backtest(params: dict) -> tuple[bool, dict, int]:
 
                 # EOD Exit
                 if not aborted and t.hour == 15 and t.minute >= 15:
-                    day_pnl = live_mtm
+                    if recovery_done:
+                        day_pnl = live_mtm - ((rec_ce_entry + rec_pe_entry) * qty * 0.001) # exit slippage for recovery
+                    else:
+                        day_pnl = live_mtm - ((ce_entry + pe_entry) * qty * 0.001) # exit slippage for morning
                     ce_open = pe_open = False
                     rec_ce_open = rec_pe_open = False
                     aborted = True
