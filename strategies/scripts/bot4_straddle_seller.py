@@ -285,7 +285,7 @@ def main():
             now_ist = get_ist_now()
             is_entry_minute, past_square_off = check_time_windows()
             
-            if past_square_off or (state.get("aborted_for_day", False) and not (state.get("abort_reason") == "LOSS" and not state.get("recovery_done", False))):
+            if past_square_off or (state.get("aborted_for_day", False) and state.get("abort_reason") != "LOSS"):
                 # EOD Square off for ALL legs
                 if state["ce_leg"] and state["ce_leg"]["is_open"]:
                     ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
