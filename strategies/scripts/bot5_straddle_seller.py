@@ -59,8 +59,8 @@ def get_deployed_capital(symbol, qty):
 # Used as fallback if qty somehow isn't available
 FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 
-# Backtest-proven: 1.0% Spot SL avoids getting chopped out by noise
-SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.01"))
+# Backtest-proven: 0.5% Spot SL is optimal for Bot5 on NIFTY
+SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.005"))
 
 PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
@@ -220,14 +220,14 @@ def execute_strangle(client, spot, expiry_formatted, qty, width_pct=0.005):
             "entry_price": ce_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss_spot": spot * (1 + 0.01),
+            "stop_loss_spot": spot * (1 + SPOT_SL_PCT),
             "ref_spot": spot
         }, {
             "symbol": pe_sym,
             "entry_price": pe_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss_spot": spot * (1 - 0.01),
+            "stop_loss_spot": spot * (1 - SPOT_SL_PCT),
             "ref_spot": spot
         }
     except Exception as e:
