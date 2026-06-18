@@ -1575,7 +1575,7 @@ def run_backtest_route():
 def run_backtest_bot_route():
     """Run specific custom bot backtest on stored historical data."""
     try:
-        from services.backtest_service import run_bot1_backtest, run_bot2_backtest, run_bot3_backtest, run_bot4_backtest
+        from services.backtest_service import run_bot1_backtest, run_bot2_backtest, run_bot3_backtest, run_bot4_backtest, run_bot5_backtest
         from services.backtest_mcx_service import run_bot1_mcx_backtest, run_bot2_mcx_backtest, run_bot3_mcx_backtest
 
         data = request.get_json() or {}
@@ -1595,6 +1595,8 @@ def run_backtest_bot_route():
             success, response, status_code = run_bot3_mcx_backtest(data)
         elif bot_id == "bot4":
             success, response, status_code = run_bot4_backtest(data)
+        elif bot_id == "bot5":
+            success, response, status_code = run_bot5_backtest(data)
         else:
             return jsonify({"status": "error", "message": f"Unsupported bot ID: {bot_id}"}), 400
             

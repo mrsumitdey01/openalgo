@@ -1,0 +1,13 @@
+{
+    "initial_capital": 150000.0,
+    "final_capital": 158183.5,
+    "net_pnl": 8183.5,
+    "roi_pct": 5.46,
+    "total_trades": 247,
+    "win_rate_pct": 59.9,
+    "winning_trades": 148,
+    "losing_trades": 99,
+    "profit_factor": 1.0,
+    "max_drawdown_pct": 16.74,
+    "avg_trade_pnl": 33.13
+}

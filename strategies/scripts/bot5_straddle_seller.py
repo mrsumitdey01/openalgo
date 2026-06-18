@@ -59,16 +59,17 @@ def get_deployed_capital(symbol, qty):
 # Used as fallback if qty somehow isn't available
 FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
 
-# Backtest-proven: 0.5% Spot SL is optimal for Bot5 on NIFTY
+# Backtest-proven: 0.5% Spot SL avoids getting chopped out by noise
 SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.005"))
 
 PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
 
 # Smart Adjustment Configs
-GAP_ABORT_PCT = float(os.getenv("GAP_ABORT_PCT", "0.005"))   # skip if gap > 0.5%
+GAP_ABORT_PCT = float(os.getenv("GAP_ABORT_PCT", "0.008"))   # skip if gap > 0.8%
+PREV_RANGE_PCT_MAX = float(os.getenv("PREV_RANGE_PCT_MAX", "0.012")) # skip if yesterday's range > 1.2%
 
-ENTRY_TIME    = os.getenv("ENTRY_TIME",    "09:30")
+ENTRY_TIME    = os.getenv("ENTRY_TIME",    "10:00")
 HARD_SQUARE_OFF = os.getenv("HARD_SQUARE_OFF", "15:15")
 
 PAPER_MODE  = os.getenv("PAPER_MODE", "true").lower() == "true"
@@ -78,6 +79,29 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 def get_ist_now():
     return datetime.now(IST)
+
+def get_yesterday_range(symbol):
+    try:
+        import yfinance as yf
+        ticker_map = {"NIFTY": "^NSEI", "BANKNIFTY": "^NSEBANK", "FINNIFTY": "NIFTY_FIN_SERVICE.NS"}
+        yf_sym = ticker_map.get(symbol, "^NSEI")
+        tk = yf.Ticker(yf_sym)
+        df = tk.history(period="5d")
+        if df.empty: return 0.0
+        today_date = pd.Timestamp(get_ist_now().date(), tz=IST)
+        df.index = pd.to_datetime(df.index)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+        df = df[df.index.date < today_date.date()]
+        if len(df) >= 1:
+            prev_day = df.iloc[-1]
+            return (prev_day['High'] - prev_day['Low']) / prev_day['Close']
+        return 0.0
+    except Exception as e:
+        print(f"[{datetime.now()}] WARN: Failed to fetch yesterday's range via yfinance: {e}")
+        return 0.0
 
 def check_time_windows():
     now_time = get_ist_now().time()
@@ -167,7 +191,7 @@ def execute_straddle(client, spot, expiry_formatted, qty):
     ce_sym = f"{UNDERLYING}{expiry_formatted}{int(atm_strike)}CE"
     pe_sym = f"{UNDERLYING}{expiry_formatted}{int(atm_strike)}PE"
     
-    print(f"[{datetime.now()}] Executing 09:30 Straddle: SELL {ce_sym} & SELL {pe_sym}")
+    print(f"[{datetime.now()}] Executing {ENTRY_TIME} Straddle: SELL {ce_sym} & SELL {pe_sym}")
     
     try:
         if not PAPER_MODE:
@@ -220,14 +244,14 @@ def execute_strangle(client, spot, expiry_formatted, qty, width_pct=0.005):
             "entry_price": ce_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss_spot": spot * (1 + SPOT_SL_PCT),
+            "stop_loss_spot": spot * (1 + 0.01),
             "ref_spot": spot
         }, {
             "symbol": pe_sym,
             "entry_price": pe_ltp,
             "qty": qty,
             "is_open": True,
-            "stop_loss_spot": spot * (1 - SPOT_SL_PCT),
+            "stop_loss_spot": spot * (1 - 0.01),
             "ref_spot": spot
         }
     except Exception as e:
@@ -250,7 +274,7 @@ def close_leg(client, leg):
     return leg
 
 def main():
-    print(f"[{datetime.now()}] Initialize Bot 4 (09:30 Short Straddle with Smart Adjustments)")
+    print(f"[{datetime.now()}] Initialize Bot 5 (10:00 AM Optimized Straddle with Volatility Filter)")
     api_key = os.getenv("OPENALGO_API_KEY")
     client = api(api_key=api_key, host="http://127.0.0.1:5000")
     
@@ -322,13 +346,15 @@ def main():
                 if spot_price and state.get("day_open_price") is None:
                     state["day_open_price"] = spot_price
 
-                # FIX: Robust gap check — only abort if we have real prev_close
+                # --- APPLY VOLATILITY FILTER ---
                 if spot_price and prev_close and prev_close > 0:
                     gap_pct = abs(spot_price - prev_close) / prev_close
-                    if gap_pct > GAP_ABORT_PCT:
-                        print(f"[{datetime.now()}] ABORTING: Gap {gap_pct*100:.2f}% > threshold {GAP_ABORT_PCT*100:.2f}%")
+                    prev_range_pct = get_yesterday_range(UNDERLYING)
+                    
+                    if gap_pct > GAP_ABORT_PCT or prev_range_pct > PREV_RANGE_PCT_MAX:
+                        print(f"[{datetime.now()}] ABORTING DUE TO VOLATILITY: Gap {gap_pct*100:.2f}%, Prev Range {prev_range_pct*100:.2f}%")
                         state["aborted_for_day"] = True
-                        state["abort_reason"] = "GAP"
+                        state["abort_reason"] = "VOLATILITY_FILTER_SKIPPED"
                         state["entry_done"] = True
                         save_state(state)
                         continue
@@ -619,7 +645,7 @@ def check_signals(df_slice: pd.DataFrame, current_position: str = None) -> str:
         except Exception:
             return "HOLD"
 
-    if h == 9 and m == 30 and current_position is None:
+    if h == 10 and m == 0 and current_position is None:
         return "SHORT_STRADDLE"
     return "HOLD"
 
