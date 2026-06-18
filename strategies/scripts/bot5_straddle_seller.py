@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """
 ===============================================================================
-  bot5_STRADDLE_SELLER.PY -- 09:30 AM Intraday Short Straddle Strategy
+  bot5_STRADDLE_SELLER.PY -- 10:00 AM Optimized Short Straddle Strategy
   -------------------------------------------------------------------------
-  Executes a delta-neutral short straddle at 09:30 AM IST (post-settle-down).
+  Executes a delta-neutral short straddle at 10:00 AM IST (post-settle-down).
   Manages SL independently for the CE and PE legs.
   Squares off completely at 15:15 PM IST.
 
