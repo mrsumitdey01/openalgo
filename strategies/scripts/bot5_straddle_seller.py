@@ -8,12 +8,11 @@
   Squares off completely at 15:15 PM IST.
 
   Smart Adjustments (v3 - Data Proven from 3-Year Backtest):
-  1. Default Index: NIFTY (65 qty/lot)
-  2. Gap Abort: Aborts if Today Open > 0.5% from Yesterday's Close
-  3. MTM Trailing: Locks profits when MTM drops 50% from peak (activates at 0.25% capital)
-  4. Wednesday Risk Reduction: Half lot size on Wednesdays (gamma risk day)
-  5. Tighter SL (FIX v3): LEG_STOP_LOSS_PCT reduced from 25% to 20% of premium
-     WHY: 3-year backtest shows 0.4% spot SL -> +Rs.1.5L profit & 58.7% win rate
+  1. Default Index: NIFTY (25 qty/lot)
+  2. Volatility Filter: Aborts if Today Open > 0.8% from Yesterday's Close or Prev Range > 1.2%
+  3. MTM Trailing: Locks profits when MTM drops 50% from peak
+  4. 14:00 Timed Exit: Cuts recovery legs flat if unprofitable by 2:00 PM
+  5. 1% Spot Stop Loss
 ===============================================================================
 """
 
@@ -35,11 +34,11 @@ EXECUTION_MODE = "options_selling"
 
 def _get_default_param(param_name, underlying):
     if param_name == "LOT_SIZE":
-        if underlying == "NIFTY": return 65
-        elif underlying == "BANKNIFTY": return 30
-        elif underlying == "FINNIFTY": return 60
-        elif underlying == "MIDCPNIFTY": return 120
-        return 30
+        if underlying == "NIFTY": return 25
+        elif underlying == "BANKNIFTY": return 15
+        elif underlying == "FINNIFTY": return 25
+        elif underlying == "MIDCPNIFTY": return 50
+        return 25
     elif param_name == "STRIKE_INTERVAL":
         if underlying == "NIFTY": return 50
         elif underlying == "BANKNIFTY": return 100
@@ -53,14 +52,14 @@ STRIKE_INTERVAL = int(os.getenv("STRIKE_INTERVAL", str(_get_default_param("STRIK
 
 def get_deployed_capital(symbol, qty):
     margin_per_lot = 160000 if symbol == "BANKNIFTY" else (100000 if symbol == "SENSEX" else (185000 if symbol == "NIFTY" else 160000))
-    base_lot_size = 30 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (40 if symbol == "FINNIFTY" else 65))
+    base_lot_size = 15 if symbol == "BANKNIFTY" else (10 if symbol == "SENSEX" else (25 if symbol == "FINNIFTY" else 25))
     return max(margin_per_lot, (qty / base_lot_size) * margin_per_lot)
 
 # Used as fallback if qty somehow isn't available
-FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "800000.0"))
+FALLBACK_CAPITAL = float(os.getenv("CAPITAL", "185000.0"))
 
-# Backtest-proven: 0.5% Spot SL avoids getting chopped out by noise
-SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.005"))
+# Backtest-proven: 1.0% Spot SL avoids getting chopped out by noise while preventing disasters
+SPOT_SL_PCT = float(os.getenv("SPOT_SL_PCT", "0.01"))
 
 PROFIT_TARGET_PER_LOT = float(os.getenv("PROFIT_TARGET_PER_LOT", "1600"))
 MAX_MTM_LOSS_PCT = float(os.getenv("MAX_MTM_LOSS_PCT", "0.02"))  # 2% of capital max loss
@@ -408,7 +407,7 @@ def main():
                 dynamic_capital = get_deployed_capital(UNDERLYING, deployed_qty)
                 
                 # Dynamic base lot calculation for absolute target
-                base_lot_size = 30 if UNDERLYING == "BANKNIFTY" else (10 if UNDERLYING == "SENSEX" else (40 if UNDERLYING == "FINNIFTY" else 65))
+                base_lot_size = 15 if UNDERLYING == "BANKNIFTY" else (10 if UNDERLYING == "SENSEX" else (25 if UNDERLYING == "FINNIFTY" else 25))
                 
                 # --- SMART DAY-OF-WEEK TARGET SWITCHER ---
                 day_of_week = get_ist_now().weekday() # 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri
