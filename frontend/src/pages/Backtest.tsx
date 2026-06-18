@@ -144,10 +144,6 @@ export default function Backtest() {
   const [bot4TrendFilterPct, setBot4TrendFilterPct] = useState('1.0')
   const [bot4RecTimedExit, setBot4RecTimedExit] = useState(true)
   const [bot4RecTimedExitHour, setBot4RecTimedExitHour] = useState('14')
-  const [bot5TargetType, setBot5TargetType] = useState('fixed_1600')
-  const [bot5TrendFilterPct, setBot5TrendFilterPct] = useState('1.0')
-  const [bot5RecTimedExit, setBot5RecTimedExit] = useState(true)
-  const [bot5RecTimedExitHour, setBot5RecTimedExitHour] = useState('14')
   const [botLotSize, setBotLotSize] = useState('30')
   const [applyBrokerage, setApplyBrokerage] = useState(true)
   const [botExecutionMode, setBotExecutionMode] = useState('options_spread')
@@ -569,17 +565,10 @@ export default function Backtest() {
       lot_size: resolvedQty,
       execution_mode: botExecutionMode,
       apply_brokerage: applyBrokerage,
-      ...(selectedBotAlgorithm === 'bot5' ? {
-        target_type: bot5TargetType,
-        trend_filter_pct: Number.parseFloat(bot5TrendFilterPct) / 100,
-        rec_timed_exit: bot5RecTimedExit,
-        rec_timed_exit_hour: Number.parseInt(bot5RecTimedExitHour)
-      } : {
-        target_type: bot4TargetType, // Default back to bot 4 if needed
-        trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100,
-        rec_timed_exit: bot4RecTimedExit,
-        rec_timed_exit_hour: Number.parseInt(bot4RecTimedExitHour)
-      })
+      target_type: bot4TargetType, // Specific to Bot 4
+      trend_filter_pct: Number.parseFloat(bot4TrendFilterPct) / 100,
+      rec_timed_exit: bot4RecTimedExit,
+      rec_timed_exit_hour: Number.parseInt(bot4RecTimedExitHour)
     }
 
     setRunning(true)
@@ -1461,7 +1450,6 @@ export default function Backtest() {
                       <SelectItem value="bot2">Bot 2 (EMA Momentum)</SelectItem>
                       <SelectItem value="bot3">Bot 3 (DTC Reversal SAR)</SelectItem>
                       <SelectItem value="bot4">Bot 4 (Straddle Seller)</SelectItem>
-                      <SelectItem value="bot5">Bot 5 (Straddle Clone)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1470,20 +1458,6 @@ export default function Backtest() {
                   <div className="space-y-2">
                     <Label>Profit Target Mode</Label>
                     <Select value={bot4TargetType} onValueChange={setBot4TargetType}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select Target" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="fixed_1600">Smart Dynamic Target (₹300/₹500/₹800 per lot)</SelectItem>
-                        <SelectItem value="pct_capital">0.5% of Deployed Capital</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {selectedBotAlgorithm === 'bot5' && (
-                  <div className="space-y-2">
-                    <Label>Profit Target Mode</Label>
-                    <Select value={bot5TargetType} onValueChange={setBot5TargetType}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select Target" />
                       </SelectTrigger>
@@ -1503,17 +1477,6 @@ export default function Backtest() {
                       step="0.1" 
                       value={bot4TrendFilterPct} 
                       onChange={(e) => setBot4TrendFilterPct(e.target.value)} 
-                    />
-                  </div>
-                )}
-                {selectedBotAlgorithm === 'bot5' && (
-                  <div className="space-y-2">
-                    <Label>Extreme Trend Filter (%)</Label>
-                    <Input 
-                      type="number" 
-                      step="0.1" 
-                      value={bot5TrendFilterPct} 
-                      onChange={(e) => setBot5TrendFilterPct(e.target.value)} 
                     />
                   </div>
                 )}
@@ -1546,36 +1509,8 @@ export default function Backtest() {
                     )}
                   </div>
                 )}
-                {selectedBotAlgorithm === 'bot5' && (
-                  <div className="space-y-2">
-                    <Label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={bot5RecTimedExit}
-                        onChange={(e) => setBot5RecTimedExit(e.target.checked)}
-                        className="h-4 w-4"
-                      />
-                      Recovery Timed Exit (Strategy A)
-                    </Label>
-                    {bot5RecTimedExit && (
-                      <div className="flex items-center gap-2 pl-6">
-                        <Label className="text-sm text-muted-foreground">Exit at hour:</Label>
-                        <Input
-                          type="number"
-                          min="13"
-                          max="15"
-                          step="1"
-                          value={bot5RecTimedExitHour}
-                          onChange={(e) => setBot5RecTimedExitHour(e.target.value)}
-                          className="w-20"
-                        />
-                        <span className="text-xs text-muted-foreground">:00 IST (if in loss)</span>
-                      </div>
-                    )}
-                  </div>
-                )}
 
-                {selectedBotAlgorithm !== 'bot4' && selectedBotAlgorithm !== 'bot5' && (
+                {selectedBotAlgorithm !== 'bot4' && (
                   <div className="space-y-2">
                     <Label>Execution Mode</Label>
                     <Select value={botExecutionMode} onValueChange={setBotExecutionMode}>
