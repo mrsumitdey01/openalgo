@@ -170,17 +170,13 @@ def execute_straddle(client, spot, expiry_formatted, qty):
     print(f"[{datetime.now()}] Executing 09:30 Straddle: SELL {ce_sym} & SELL {pe_sym}")
     
     try:
+        if not PAPER_MODE:
+            client.placeorder(strategy=STRATEGY_NAME, symbol=ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+            client.placeorder(strategy=STRATEGY_NAME, symbol=pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+        
         time.sleep(1) 
         ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=ce_sym).get("last_price", spot*0.01)
         pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=pe_sym).get("last_price", spot*0.01)
-        if not PAPER_MODE:
-            ce_limit = round(ce_ltp * 0.95, 1)
-            pe_limit = round(pe_ltp * 0.95, 1)
-            client.placeorder(strategy=STRATEGY_NAME, symbol=ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=ce_limit, product="MIS", quantity=qty)
-            client.placeorder(strategy=STRATEGY_NAME, symbol=pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=pe_limit, product="MIS", quantity=qty)
-            time.sleep(1) 
-            ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=ce_sym).get("last_price", ce_ltp)
-            pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=pe_sym).get("last_price", pe_ltp)
         
         return {
             "symbol": ce_sym,
@@ -211,17 +207,13 @@ def execute_strangle(client, spot, expiry_formatted, qty, width_pct=0.005):
     print(f"[{datetime.now()}] Executing 12:30 Recovery Strangle: SELL {ce_sym} & SELL {pe_sym}")
     
     try:
+        if not PAPER_MODE:
+            client.placeorder(strategy=STRATEGY_NAME, symbol=ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+            client.placeorder(strategy=STRATEGY_NAME, symbol=pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+        
         time.sleep(1) 
         ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=ce_sym).get("last_price", spot*0.01)
         pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=pe_sym).get("last_price", spot*0.01)
-        if not PAPER_MODE:
-            ce_limit = round(ce_ltp * 0.95, 1)
-            pe_limit = round(pe_ltp * 0.95, 1)
-            client.placeorder(strategy=STRATEGY_NAME, symbol=ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=ce_limit, product="MIS", quantity=qty)
-            client.placeorder(strategy=STRATEGY_NAME, symbol=pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=pe_limit, product="MIS", quantity=qty)
-            time.sleep(1) 
-            ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=ce_sym).get("last_price", ce_ltp)
-            pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=pe_sym).get("last_price", pe_ltp)
         
         return {
             "symbol": ce_sym,
@@ -428,12 +420,10 @@ def main():
                                     new_pe_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}PE"
                                     qty = state["pe_leg"]["qty"]
                                     
-                                    new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", current_spot*0.01)
                                     if not PAPER_MODE:
-                                        limit_p = round(new_pe_ltp * 0.95, 1)
-                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=limit_p, product="MIS", quantity=qty)
-                                        time.sleep(1)
-                                        new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", new_pe_ltp)
+                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_pe_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+                                    time.sleep(1)
+                                    new_pe_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_pe_sym).get("last_price", current_spot*0.01)
                                     
                                     state["pe_leg"] = {
                                         "symbol": new_pe_sym,
@@ -474,12 +464,10 @@ def main():
                                     new_ce_sym = f"{UNDERLYING}{expiry_fmt}{int(atm_strike)}CE"
                                     qty = state["ce_leg"]["qty"]
                                     
-                                    new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", current_spot*0.01)
                                     if not PAPER_MODE:
-                                        limit_p = round(new_ce_ltp * 0.95, 1)
-                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=limit_p, product="MIS", quantity=qty)
-                                        time.sleep(1)
-                                        new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", new_ce_ltp)
+                                        client.placeorder(strategy=STRATEGY_NAME, symbol=new_ce_sym, action="SELL", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=qty)
+                                    time.sleep(1)
+                                    new_ce_ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=new_ce_sym).get("last_price", current_spot*0.01)
                                     
                                     state["ce_leg"] = {
                                         "symbol": new_ce_sym,

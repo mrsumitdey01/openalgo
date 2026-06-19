@@ -267,9 +267,7 @@ def close_leg(client, leg):
     print(f"[{datetime.now()}] Closing leg: {leg['symbol']}")
     if not PAPER_MODE:
         try:
-            ltp = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=leg['symbol']).get("last_price", leg['entry_price'])
-            buy_limit = round(ltp * 1.05, 1)
-            client.placeorder(strategy=STRATEGY_NAME, symbol=leg['symbol'], action="BUY", exchange=OPTION_EXCHANGE, price_type="LIMIT", price=buy_limit, product="MIS", quantity=leg['qty'])
+            client.placeorder(strategy=STRATEGY_NAME, symbol=leg['symbol'], action="BUY", exchange=OPTION_EXCHANGE, price_type="MARKET", product="MIS", quantity=leg['qty'])
         except Exception as e:
             print(f"Error closing leg: {e}")
             
