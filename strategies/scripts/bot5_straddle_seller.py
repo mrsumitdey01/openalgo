@@ -573,6 +573,31 @@ def main():
                 if current_mtm > state.get("peak_mtm", 0):
                     state["peak_mtm"] = current_mtm
 
+                # Smart Adjustment: Trailing MTM Stop (50% lock)
+                if state.get("peak_mtm", 0) > (dynamic_capital * 0.0025):
+                    if current_mtm < state["peak_mtm"] * 0.5:
+                        print(f"[{datetime.now()}] TRAILING STOP HIT! Peak: {state['peak_mtm']:.0f}, Current: {current_mtm:.0f}")
+                        if state.get("ce_leg") and state["ce_leg"]["is_open"]: 
+                            ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["ce_leg"]["symbol"]).get("last_price", state["ce_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["ce_leg"]["entry_price"] - ce_ltp_close) * state["ce_leg"]["qty"]
+                            close_leg(client, state["ce_leg"])
+                        if state.get("pe_leg") and state["pe_leg"]["is_open"]: 
+                            pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["pe_leg"]["symbol"]).get("last_price", state["pe_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["pe_leg"]["entry_price"] - pe_ltp_close) * state["pe_leg"]["qty"]
+                            close_leg(client, state["pe_leg"])
+                        if state.get("rec_ce_leg") and state["rec_ce_leg"]["is_open"]: 
+                            r_ce_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_ce_leg"]["symbol"]).get("last_price", state["rec_ce_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["rec_ce_leg"]["entry_price"] - r_ce_ltp_close) * state["rec_ce_leg"]["qty"]
+                            close_leg(client, state["rec_ce_leg"])
+                        if state.get("rec_pe_leg") and state["rec_pe_leg"]["is_open"]: 
+                            r_pe_ltp_close = client.get_quotes(exchange=OPTION_EXCHANGE, symbol=state["rec_pe_leg"]["symbol"]).get("last_price", state["rec_pe_leg"]["entry_price"])
+                            state["realized_pnl"] += (state["rec_pe_leg"]["entry_price"] - r_pe_ltp_close) * state["rec_pe_leg"]["qty"]
+                            close_leg(client, state["rec_pe_leg"])
+                        state["aborted_for_day"] = True
+                        state["abort_reason"] = "TRAILING_STOP"
+                        save_state(state)
+                        continue
+
                 # Smart Adjustment: Take Profit Target
                 if current_mtm >= target_profit:
                     print(f"[{datetime.now()}] PROFIT TARGET HIT! MTM={current_mtm:.0f} (Target: {target_profit:.0f})")
