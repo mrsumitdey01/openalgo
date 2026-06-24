@@ -19,7 +19,41 @@ EMA_LENGTHS: list[int] = [8, 13, 21, 26, 34, 40]
 # --------------------------------------------------------------------------- #
 CAPITAL_PER_TRADE: float = 50_000.0   # Rs allocated capital per trade
 LEVERAGE: int = 5                      # Broker intraday leverage (5x)
-MAX_EXPOSURE: float = CAPITAL_PER_TRADE * LEVERAGE  # Rs 2,50,000
+MAX_EXPOSURE: float = CAPITAL_PER_TRADE * LEVERAGE  # Rs 2,50,000 (single-bot legacy)
+
+# --------------------------------------------------------------------------- #
+# SCANNER / MULTI-ASSET CONFIG
+# --------------------------------------------------------------------------- #
+CAPITAL_PER_TRADE_SCANNER: float = 50_000.0  # Rs per position in scanner mode
+MAX_SIMULTANEOUS_POSITIONS: int = 10          # Max concurrent open positions
+TOTAL_CAPITAL: float = 500_000.0              # Total deployed capital
+
+# Quantity formula for scanner: floor(CAPITAL_PER_TRADE_SCANNER / entry_price)
+# No leverage factor — pure capital allocation
+
+# Watchlist: all 97 NSE equities in db/historify.duckdb
+# Excludes NSE_INDEX (NIFTY, BANKNIFTY), BSE_INDEX (SENSEX), MCX_INDEX (CRUDEOIL, GOLDM)
+WATCHLIST: list[str] = [
+    "ABB", "ADANIENSOL", "ADANIENT", "ADANIGREEN", "ADANIPORTS",
+    "ADANIPOWER", "AMBUJACEM", "APOLLOHOSP", "ASIANPAINT", "AXISBANK",
+    "BAJAJ-AUTO", "BAJAJFINSV", "BAJFINANCE", "BANKBARODA", "BEL",
+    "BHARATFORG", "BHARTIARTL", "BOSCHLTD", "BPCL", "BRITANNIA",
+    "CANBK", "CGPOWER", "CHOLAFIN", "CIPLA", "COALINDIA",
+    "CUMMINSIND", "DABUR", "DIVISLAB", "DLF", "DMART",
+    "DRREDDY", "EICHERMOT", "ETERNAL", "GODREJCP", "GRASIM",
+    "HAL", "HCLTECH", "HDFCAMC", "HDFCBANK", "HDFCLIFE",
+    "HEROMOTOCO", "HINDALCO", "HINDUNILVR", "HYUNDAI", "ICICIBANK",
+    "ICICIGI", "ICICIPRULI", "INDHOTEL", "INDIGO", "INDUSINDBK",
+    "INFY", "IOC", "ITC", "JIOFIN", "JSWSTEEL",
+    "KOTAKBANK", "LICI", "LT", "M&M", "MANKIND",
+    "MARICO", "MARUTI", "MAXHEALTH", "NAUKRI", "NESTLEIND",
+    "NTPC", "ONGC", "PAGEIND", "PERSISTENT", "PFC",
+    "PIDILITIND", "PNB", "POWERGRID", "RECLTD", "RELIANCE",
+    "SBICARD", "SBILIFE", "SBIN", "SHRIRAMFIN", "SIEMENS",
+    "SUNPHARMA", "TATACONSUM", "TATAPOWER", "TATASTEEL", "TCS",
+    "TECHM", "TITAN", "TORNTPHARM", "TRENT", "TVSMOTOR",
+    "ULTRACEMCO", "VBL", "VEDL", "WIPRO", "ZYDUSLIFE",
+]
 
 # --------------------------------------------------------------------------- #
 # RISK MANAGEMENT — "TRIGGER AND TRAIL" LOGIC
@@ -52,7 +86,8 @@ TRAIL_PCT: float = 0.003             # 0.3% trailing distance once active
 # --------------------------------------------------------------------------- #
 # TIME FENCES (all times in 24-hr HH:MM format, IST)
 # --------------------------------------------------------------------------- #
-MARKET_START: str = "09:15"      # No entries before this time
+MARKET_START: str = "09:15"      # No entries before this time (single-bot legacy)
+SCANNER_START: str = "09:30"     # Scanner: no entries before this time
 CUTOFF_TIME: str = "14:45"       # No NEW entries after this time
 SQUARE_OFF_TIME: str = "15:15"   # Hard square-off — market order all open positions
 

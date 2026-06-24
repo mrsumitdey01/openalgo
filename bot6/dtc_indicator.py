@@ -29,7 +29,10 @@ Pine Script equivalence:
 
 import numpy as np
 import pandas as pd
-from config import EMA_LENGTHS
+try:
+    from bot6.config import EMA_LENGTHS
+except ImportError:
+    from config import EMA_LENGTHS  # fallback when run directly inside bot6/
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:

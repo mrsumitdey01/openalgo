@@ -39,13 +39,23 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
 
-from config import (
-    MAX_EXPOSURE,
-    TARGET_PCT,
-    INITIAL_SL_PCT,
-    TRAIL_ACTIVATION_PCT,
-    TRAIL_PCT,
-)
+try:
+    from bot6.config import (
+        MAX_EXPOSURE,
+        TARGET_PCT,
+        INITIAL_SL_PCT,
+        TRAIL_ACTIVATION_PCT,
+        TRAIL_PCT,
+    )
+except ImportError:
+    from config import (  # fallback when run directly inside bot6/
+        MAX_EXPOSURE,
+        TARGET_PCT,
+        INITIAL_SL_PCT,
+        TRAIL_ACTIVATION_PCT,
+        TRAIL_PCT,
+    )
+
 
 
 class Side(Enum):
