@@ -37,17 +37,16 @@ from bot6.config import (
 log = logging.getLogger("Bot6.Scanner")
 
 
-def compute_scanner_quantity(entry_price: float) -> int:
+def compute_scanner_quantity(entry_price: float, capital_per_trade: float) -> int:
     """
     Scanner position sizing:
-        Qty = floor(CAPITAL_PER_TRADE_SCANNER / entry_price)
-        = floor(50_000 / entry_price)
+        Qty = floor(capital_per_trade / entry_price)
 
     Ensures at least 1 share.
     """
     if entry_price <= 0:
         raise ValueError(f"Invalid entry price: {entry_price}")
-    return max(math.floor(CAPITAL_PER_TRADE_SCANNER / entry_price), 1)
+    return max(math.floor(capital_per_trade / entry_price), 1)
 
 
 class StateManager:

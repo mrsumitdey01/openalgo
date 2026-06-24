@@ -166,6 +166,9 @@ export default function Backtest() {
   const [commissionFlat, setCommissionFlat] = useState('20')
   const [commissionPct, setCommissionPct] = useState('0.03')
   
+  // Scanner State
+  const [scannerWatchlist, setScannerWatchlist] = useState("RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, ITC, LARSEN, AXISBANK, KOTAKBANK, SBIN, BAJFINANCE, BHARTIARTL, HINDUNILVR, ASIANPAINT, MARUTI, TITAN, SUNPHARMA, M&M, TATASTEEL, ULTRACEMCO")
+  
   // Apply Bot 4 default constraints
   useEffect(() => {
     if (selectedBotAlgorithm === 'bot4') {
@@ -413,6 +416,7 @@ export default function Backtest() {
                           <TableHeader className="bg-muted/30 sticky top-0 z-10">
                             <TableRow>
                               <TableHead className="w-12 text-center">ID</TableHead>
+                              {backtestResult.strategy === 'bot6_scanner' && <TableHead>Symbol</TableHead>}
                               <TableHead>Dir</TableHead>
                               <TableHead>Qty</TableHead>
                               <TableHead>Entry Price
@@ -429,11 +433,14 @@ export default function Backtest() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {backtestResult.trades.slice(0, visibleTradesLimit).map((t: any) => (
-                              <TableRow key={t.id} className="hover:bg-muted/20">
+                            {backtestResult.trades.slice(0, visibleTradesLimit).map((t: any, index: number) => (
+                              <TableRow key={t.id || index} className="hover:bg-muted/20">
                                 <TableCell className="text-center font-semibold text-muted-foreground">
-                                  {t.id}
+                                  {t.id || index + 1}
                                 </TableCell>
+                                {backtestResult.strategy === 'bot6_scanner' && (
+                                  <TableCell className="font-bold">{t.symbol}</TableCell>
+                                )}
                                 <TableCell>
                                   <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
                                     t.direction === 'LONG' || t.direction === 'BUY'
@@ -603,6 +610,45 @@ export default function Backtest() {
       }
     } catch {
       showToast.error('Failed to run bot backtest simulation')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const handleRunScannerBacktest = async () => {
+    if (!startDate || !endDate) {
+      showToast.error('Please select start and end dates')
+      return
+    }
+
+    const payload = {
+      start_date: startDate,
+      end_date: endDate,
+      capital: Number.parseFloat(capital) || 500000,
+      symbols: scannerWatchlist
+    }
+
+    setRunning(true)
+    setBacktestResult(null)
+    setVisibleTradesLimit(1000)
+
+    try {
+      const csrfToken = await fetchCSRFToken()
+      const response = await fetch('/historify/api/backtest_scanner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+      })
+      const data = await response.json()
+      if (data.status === 'success') {
+        setBacktestResult(data)
+        showToast.success('Scanner Backtest completed successfully!')
+      } else {
+        showToast.error(data.message || 'Scanner Backtest failed')
+      }
+    } catch {
+      showToast.error('Failed to run scanner backtest simulation')
     } finally {
       setRunning(false)
     }
@@ -988,12 +1034,15 @@ export default function Backtest() {
 
       <Tabs defaultValue="simulator" className="w-full">
         <div className="flex justify-center mb-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-3">
+          <TabsList className="grid w-full max-w-4xl grid-cols-4">
             <TabsTrigger value="simulator" className="flex items-center gap-2">
               <LineChart className="h-4 w-4" /> Standard Simulator
             </TabsTrigger>
             <TabsTrigger value="bots" className="flex items-center gap-2">
               <Bot className="h-4 w-4" /> Custom Bots Backtest
+            </TabsTrigger>
+            <TabsTrigger value="scanner" className="flex items-center gap-2">
+              <Activity className="h-4 w-4" /> Bot 6 Scanner
             </TabsTrigger>
             <TabsTrigger value="paper" className="flex items-center gap-2">
               <CircleDot className="h-4 w-4" /> Paper Trading
@@ -1635,7 +1684,83 @@ export default function Backtest() {
           </div>
         </TabsContent>
 
-        {/* â”€â”€â”€ PAPER TRADE TAB â”€â”€â”€ */}
+        {/* ─── SCANNER TAB ─── */}
+        <TabsContent value="scanner" className="mt-0">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <Card className="lg:col-span-4 border border-border/80 shadow-md">
+              <CardHeader>
+                <CardTitle className="text-lg font-bold flex items-center gap-2">
+                  <Play className="h-5 w-5 text-primary" /> Run Scanner Backtest
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Alert className="bg-primary/5 border-primary/20">
+                  <Info className="h-5 w-5 text-primary" />
+                  <AlertTitle className="text-primary font-bold text-sm">Bot 6 Scanner</AlertTitle>
+                  <AlertDescription className="mt-1 text-xs text-muted-foreground">
+                    This runs the multi-asset bot6_live_strategy concurrently across the provided watchlist.
+                    Note: A large watchlist over 2 years will take a few seconds to run.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="scanner-start-date">Start Date</Label>
+                    <Input id="scanner-start-date" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="scanner-end-date">End Date</Label>
+                    <Input id="scanner-end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="scanner-capital">Total Starting Capital</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input id="scanner-capital" type="number" className="pl-8" value={capital} onChange={(e) => setCapital(e.target.value)} />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">Will deploy max 10% of total capital per trade (Max 10 open positions).</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="scanner-watchlist">Watchlist Symbols (comma-separated)</Label>
+                  <textarea
+                    id="scanner-watchlist"
+                    className="flex min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    value={scannerWatchlist}
+                    onChange={(e) => setScannerWatchlist(e.target.value)}
+                    placeholder="INFY, TCS, RELIANCE..."
+                  />
+                </div>
+
+                <Button className="w-full mt-2 bg-primary text-primary-foreground font-semibold" size="lg" onClick={handleRunScannerBacktest} disabled={running}>
+                  {running ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Running Scanner...</> : <><Play className="mr-2 h-5 w-5" /> Run Scanner Backtest</>}
+                </Button>
+              </CardContent>
+            </Card>
+
+            <div className="lg:col-span-8 space-y-6">
+              {!backtestResult && !running && (
+                <Card className="flex flex-col items-center justify-center p-16 text-center border-dashed border-2 bg-muted/5 h-[400px]">
+                  <Activity className="h-12 w-12 text-muted-foreground/60 mb-4 animate-pulse" />
+                  <h3 className="font-bold text-lg text-muted-foreground">Scanner Lab Standby</h3>
+                  <p className="text-muted-foreground/80 max-w-sm text-sm mt-1">Adjust parameters on the left and hit Run.</p>
+                </Card>
+              )}
+              {running && (
+                <Card className="flex flex-col items-center justify-center p-16 text-center bg-muted/5 h-[400px]">
+                  <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+                  <h3 className="font-bold text-lg text-primary">Running Scanner Engine</h3>
+                  <p className="text-muted-foreground/80 max-w-sm text-sm mt-1">Processing up to 100 symbols concurrently. This may take 5-15 seconds.</p>
+                </Card>
+              )}
+              {renderResults()}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* ─── PAPER TRADE TAB ─── */}
         <TabsContent value="paper" className="mt-0">
           <PaperTradePanel />
         </TabsContent>

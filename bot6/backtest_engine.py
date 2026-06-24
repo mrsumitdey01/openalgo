@@ -106,6 +106,8 @@ def run_backtest(
     symbols: list[str] | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    total_capital: float = 500000.0,
+    capital_per_trade: float = 50000.0,
 ) -> list[dict]:
     """
     Run the full multi-asset backtest.
@@ -120,6 +122,10 @@ def run_backtest(
         ISO date string like "2024-06-24". Defaults to 2 years ago.
     end_date : str or None
         ISO date string like "2026-06-24". Defaults to today.
+    total_capital: float
+        Total capital to deploy across all concurrent positions.
+    capital_per_trade: float
+        Capital allocated to a single position.
 
     Returns
     -------
@@ -150,7 +156,7 @@ def run_backtest(
 
     log.info(f"[BACKTEST] Starting backtest: {start_date} → {end_date}")
     log.info(f"[BACKTEST] Universe: {len(symbols)} symbols")
-    log.info(f"[BACKTEST] Capital: ₹{TOTAL_CAPITAL:,.0f} | Max positions: 10 | ₹50,000/trade")
+    log.info(f"[BACKTEST] Capital: ₹{total_capital:,.0f} | Max positions: 10 | ₹{capital_per_trade:,.0f}/trade")
 
     # ------------------------------------------------------------------
     # 2. Load data
@@ -244,12 +250,12 @@ def run_backtest(
 
             if action_buy and not action_sell:
                 entry_price = float(row["open"])
-                qty = compute_scanner_quantity(entry_price)
+                qty = compute_scanner_quantity(entry_price, capital_per_trade)
                 state.enter(sym, Side.LONG, entry_price, qty, ts)
 
             elif action_sell and not action_buy:
                 entry_price = float(row["open"])
-                qty = compute_scanner_quantity(entry_price)
+                qty = compute_scanner_quantity(entry_price, capital_per_trade)
                 state.enter(sym, Side.SHORT, entry_price, qty, ts)
 
     # ------------------------------------------------------------------

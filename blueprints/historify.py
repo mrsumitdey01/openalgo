@@ -1606,6 +1606,21 @@ def run_backtest_bot_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@historify_bp.route("/api/backtest_scanner", methods=["POST"])
+@check_session_validity
+def run_backtest_scanner_route():
+    """Run Bot 6 Scanner multi-asset backtest on stored historical data."""
+    try:
+        from services.backtest_scanner_service import run_scanner_backtest
+
+        data = request.get_json() or {}
+        success, response, status_code = run_scanner_backtest(data)
+        return jsonify(response), status_code
+    except Exception as e:
+        logger.exception(f"Error in backtest scanner route: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # ─── Paper Trade Endpoints ──────────────────────────────────────────────────
 
 @historify_bp.route("/api/paper_trade/start", methods=["POST"])
