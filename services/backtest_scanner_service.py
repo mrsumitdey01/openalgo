@@ -1,14 +1,23 @@
 import logging
-from bot6.backtest_engine import run_backtest
-from bot6.config import WATCHLIST
+import importlib
 
 logger = logging.getLogger(__name__)
 
 def run_scanner_backtest(params: dict) -> tuple[bool, dict, int]:
     """
-    Run Bot 6 Scanner backtest over multiple symbols simultaneously.
+    Run Bot 6 or Bot 6b Scanner backtest over multiple symbols simultaneously.
     """
     try:
+        bot_id = params.get("bot_id", "bot6")
+        if bot_id not in ["bot6", "bot6b"]:
+            return False, {"status": "error", "message": f"Unsupported scanner bot: {bot_id}"}, 400
+            
+        engine_module = importlib.import_module(f"{bot_id}.backtest_engine")
+        config_module = importlib.import_module(f"{bot_id}.config")
+        
+        run_backtest = getattr(engine_module, "run_backtest")
+        WATCHLIST = getattr(config_module, "WATCHLIST")
+
         start_date = params.get("start_date")
         end_date = params.get("end_date")
         total_capital = float(params.get("capital", 500000.0))
@@ -97,7 +106,7 @@ def run_scanner_backtest(params: dict) -> tuple[bool, dict, int]:
 
         response = {
             "status": "success",
-            "strategy": "bot6_scanner",
+            "strategy": f"{bot_id}_scanner",
             "metrics": metrics,
             "trades": trades,
             "chart_data": [] 

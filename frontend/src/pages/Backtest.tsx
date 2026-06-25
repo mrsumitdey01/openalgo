@@ -168,6 +168,7 @@ export default function Backtest() {
   
   // Scanner State
   const [scannerWatchlist, setScannerWatchlist] = useState("RELIANCE, HDFCBANK, ICICIBANK, INFY, TCS, ITC, LARSEN, AXISBANK, KOTAKBANK, SBIN, BAJFINANCE, BHARTIARTL, HINDUNILVR, ASIANPAINT, MARUTI, TITAN, SUNPHARMA, M&M, TATASTEEL, ULTRACEMCO")
+  const [scannerBotId, setScannerBotId] = useState("bot6")
   
   // Apply Bot 4 default constraints
   useEffect(() => {
@@ -416,7 +417,7 @@ export default function Backtest() {
                           <TableHeader className="bg-muted/30 sticky top-0 z-10">
                             <TableRow>
                               <TableHead className="w-12 text-center">ID</TableHead>
-                              {backtestResult.strategy === 'bot6_scanner' && <TableHead>Symbol</TableHead>}
+                              {backtestResult.strategy.endsWith('_scanner') && <TableHead>Symbol</TableHead>}
                               <TableHead>Dir</TableHead>
                               <TableHead>Qty</TableHead>
                               <TableHead>Entry Price
@@ -438,7 +439,7 @@ export default function Backtest() {
                                 <TableCell className="text-center font-semibold text-muted-foreground">
                                   {t.id || index + 1}
                                 </TableCell>
-                                {backtestResult.strategy === 'bot6_scanner' && (
+                                {backtestResult.strategy.endsWith('_scanner') && (
                                   <TableCell className="font-bold">{t.symbol}</TableCell>
                                 )}
                                 <TableCell>
@@ -625,7 +626,8 @@ export default function Backtest() {
       start_date: startDate,
       end_date: endDate,
       capital: Number.parseFloat(capital) || 500000,
-      symbols: scannerWatchlist
+      symbols: scannerWatchlist,
+      bot_id: scannerBotId
     }
 
     setRunning(true)
@@ -1696,12 +1698,25 @@ export default function Backtest() {
               <CardContent className="space-y-4">
                 <Alert className="bg-primary/5 border-primary/20">
                   <Info className="h-5 w-5 text-primary" />
-                  <AlertTitle className="text-primary font-bold text-sm">Bot 6 Scanner</AlertTitle>
+                  <AlertTitle className="text-primary font-bold text-sm">Bot Scanner</AlertTitle>
                   <AlertDescription className="mt-1 text-xs text-muted-foreground">
-                    This runs the multi-asset bot6_live_strategy concurrently across the provided watchlist.
+                    This runs the multi-asset live strategy concurrently across the provided watchlist.
                     Note: A large watchlist over 2 years will take a few seconds to run.
                   </AlertDescription>
                 </Alert>
+
+                <div className="space-y-2">
+                  <Label htmlFor="scanner-bot-id">Strategy</Label>
+                  <Select value={scannerBotId} onValueChange={setScannerBotId}>
+                    <SelectTrigger id="scanner-bot-id" className="w-full">
+                      <SelectValue placeholder="Select Scanner Strategy" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bot6">Bot 6 Scanner (Stocks)</SelectItem>
+                      <SelectItem value="bot6b">Bot 6b Scanner (Stocks Clone)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -1892,6 +1907,9 @@ function PaperTradePanel() {
     if (bot === 'bot3') return 'Bot 3 (DTC SAR)'
     if (bot === 'bot3_mcx') return 'Bot 3 (MCX SAR)'
     if (bot === 'bot4') return 'Bot 4 (Straddle Seller)'
+    if (bot === 'bot5') return 'Bot 5 (Straddle Seller)'
+    if (bot === 'bot6') return 'Bot 6 (Scanner)'
+    if (bot === 'bot6b') return 'Bot 6b (Scanner Clone)'
     return bot
   }
 
@@ -2030,6 +2048,9 @@ function PaperTradePanel() {
               <SelectItem value="bot2">Bot 2 (EMA Mom)</SelectItem>
               <SelectItem value="bot3">Bot 3 (DTC SAR)</SelectItem>
               <SelectItem value="bot4">Bot 4 (Straddle)</SelectItem>
+              <SelectItem value="bot5">Bot 5 (Straddle)</SelectItem>
+              <SelectItem value="bot6">Bot 6 (Scanner)</SelectItem>
+              <SelectItem value="bot6b">Bot 6b (Scanner)</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filterExchange} onValueChange={setFilterExchange}>
