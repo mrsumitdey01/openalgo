@@ -1,7 +1,7 @@
 """
 bot6b/live_engine.py
 ===================
-Async multi-asset live execution engine for the Bot6bbb Scanner.
+Async multi-asset live execution engine for the Bot6b Scanner.
 
 Uses ThreadPoolExecutor to fetch 1-min OHLCV data for all symbols
 concurrently, compute DTC signals, and execute orders via the OpenAlgo API.
@@ -54,7 +54,7 @@ from bot6b.config import (
     MAX_SIMULTANEOUS_POSITIONS,
 )
 
-log = logging.getLogger("Bot6bbb.Live")
+log = logging.getLogger("Bot6b.Live")
 
 # Number of bars to fetch per symbol (enough for EMA-40 warmup + buffer)
 LOOKBACK_BARS = 200
@@ -114,7 +114,7 @@ def run_live(
     api_client,
     watchlist: list[str] | None = None,
     exchange: str = "NSE",
-    strategy_name: str = "Bot6bbb_Scanner",
+    strategy_name: str = "Bot6b_Scanner",
 ) -> None:
     """
     Main live trading loop. Runs until KeyboardInterrupt.
@@ -136,7 +136,7 @@ def run_live(
     state = StateManager()
     feed = LiveFeed(api_client, exchange=exchange)
 
-    log.info(f"[LIVE] Bot6bbb Scanner started.")
+    log.info(f"[LIVE] Bot6b Scanner started.")
     log.info(f"[LIVE] Watching {len(watchlist)} symbols | Max {MAX_SIMULTANEOUS_POSITIONS} positions")
     log.info(f"[LIVE] Time fences: entry {SCANNER_START} – {CUTOFF_TIME} | square-off {SQUARE_OFF_TIME}")
 

@@ -1,7 +1,7 @@
 """
 bot6b/state_manager.py
 =====================
-Multi-position state manager for the Bot6bbb Scanner.
+Multi-position state manager for the Bot6b Scanner.
 
 Tracks up to MAX_SIMULTANEOUS_POSITIONS open positions simultaneously,
 one per symbol. Provides a clean API for:
@@ -31,27 +31,31 @@ from bot6b.config import (
     MAX_SIMULTANEOUS_POSITIONS,
     CAPITAL_PER_TRADE_SCANNER,
     TARGET_PCT,
-    INITIAL_SL_PCT,
+    SPREAD_SL_PCT,
+    LEVERAGE,
 )
 
-log = logging.getLogger("Bot6bbb.Scanner")
+log = logging.getLogger("Bot6b.Scanner")
 
 
 def compute_scanner_quantity(entry_price: float, capital_per_trade: float) -> int:
     """
-    Scanner position sizing:
-        Qty = floor(capital_per_trade / entry_price)
+    Scanner position sizing with Intraday Leverage:
+        Max Exposure = capital_per_trade * LEVERAGE
+        Qty = floor(Max Exposure / entry_price)
 
     Ensures at least 1 share.
     """
     if entry_price <= 0:
         raise ValueError(f"Invalid entry price: {entry_price}")
-    return max(math.floor(capital_per_trade / entry_price), 1)
+    
+    max_exposure = capital_per_trade * LEVERAGE
+    return max(math.floor(max_exposure / entry_price), 1)
 
 
 class StateManager:
     """
-    Manages the collection of open Bot6bbb positions across all symbols.
+    Manages the collection of open Bot6b positions across all symbols.
 
     Attributes
     ----------
@@ -64,20 +68,30 @@ class StateManager:
     def __init__(self):
         self.active_positions: dict[str, Position] = {}
         self.closed_trades: list[dict] = []
+        self.trades_today: dict[str, int] = {}
+        self.current_date = None
 
     # ------------------------------------------------------------------ #
     # Entry
     # ------------------------------------------------------------------ #
 
-    def can_enter(self, symbol: str) -> bool:
+    def can_enter(self, symbol: str, current_ts: pd.Timestamp) -> bool:
         """
         Returns True if:
           1. Symbol has no currently open position.
           2. Total open positions < MAX_SIMULTANEOUS_POSITIONS.
+          3. Symbol has not already been traded today (Max 1 trade per symbol per day).
         """
+        trade_date = current_ts.date()
+        if self.current_date != trade_date:
+            self.current_date = trade_date
+            self.trades_today.clear()
+
         if symbol in self.active_positions:
             return False
         if len(self.active_positions) >= MAX_SIMULTANEOUS_POSITIONS:
+            return False
+        if self.trades_today.get(symbol, 0) >= 1:
             return False
         return True
 
@@ -102,11 +116,12 @@ class StateManager:
             entry_time=ts,
         )
         self.active_positions[symbol] = pos
+        self.trades_today[symbol] = self.trades_today.get(symbol, 0) + 1
         log.info(
             f"[{ts.strftime('%H:%M:%S')}] [SCANNER] {symbol} triggered "
             f"{'LONG' if side == Side.LONG else 'SHORT'}. Executing... "
             f"Entry={entry_price:.2f} Qty={qty} "
-            f"SL={pos.initial_sl:.2f} TP={pos.target:.2f} "
+            f"SL={pos.risk_sl:.2f} TP={pos.target:.2f} "
             f"[{len(self.active_positions)}/{MAX_SIMULTANEOUS_POSITIONS} positions open]"
         )
         return pos
@@ -117,7 +132,7 @@ class StateManager:
 
     def update_all(
         self,
-        bars_by_symbol: dict[str, tuple[float, float, float, float]],
+        bars_by_symbol: dict[str, dict],
         current_ts: pd.Timestamp,
     ) -> list[dict]:
         """
@@ -125,8 +140,8 @@ class StateManager:
 
         Parameters
         ----------
-        bars_by_symbol : dict[str, (open, high, low, close)]
-            OHLC values for the current bar, keyed by symbol.
+        bars_by_symbol : dict[str, dict]
+            Row data for the current bar, keyed by symbol.
         current_ts : pd.Timestamp
             Timestamp of the current bar.
 
@@ -142,13 +157,16 @@ class StateManager:
             if symbol not in bars_by_symbol:
                 continue  # No data for this symbol on this bar
 
-            bar_open, bar_high, bar_low, bar_close = bars_by_symbol[symbol]
+            bar = bars_by_symbol[symbol]
+            bar_open, bar_high, bar_low, bar_close = bar["open"], bar["high"], bar["low"], bar["close"]
 
-            # Step 1: Update trail
-            pos.update_trail(bar_high, bar_low)
+            # Step 1: Update peak
+            pos.update_peak(bar_high, bar_low)
 
             # Step 2: Check exit
-            exit_result = pos.check_exit(bar_high, bar_low, bar_close)
+            exit_result = pos.check_exit(
+                bar_high, bar_low, bar_close
+            )
             if exit_result:
                 exit_px, reason = exit_result
                 trade = self._close(symbol, pos, exit_px, reason, current_ts)
@@ -158,7 +176,7 @@ class StateManager:
 
     def eod_squareoff(
         self,
-        bars_by_symbol: dict[str, tuple[float, float, float, float]],
+        bars_by_symbol: dict[str, dict],
         current_ts: pd.Timestamp,
     ) -> list[dict]:
         """
@@ -169,7 +187,7 @@ class StateManager:
         for symbol in list(self.active_positions.keys()):
             pos = self.active_positions[symbol]
             if symbol in bars_by_symbol:
-                exit_px = bars_by_symbol[symbol][0]  # Use bar open as fill
+                exit_px = bars_by_symbol[symbol]["open"]  # Use bar open as fill
             else:
                 exit_px = pos.entry_price  # Fallback
             trade = self._close(symbol, pos, exit_px, ExitReason.EOD_SQUAREOFF, current_ts)
@@ -206,7 +224,7 @@ class StateManager:
             "qty": pos.qty,
             "gross_pnl": round(gross_pnl, 2),
             "exit_reason": reason.value,
-            "initial_sl": round(pos.initial_sl, 2),
+            "risk_sl": round(pos.risk_sl, 2),
             "target": round(pos.target, 2),
             "peak_price": round(pos.peak_price, 2),
             "capital_deployed": round(pos.entry_price * pos.qty, 2),

@@ -1,7 +1,7 @@
 """
 bot6b/backtest_runner.py
 =======================
-Backtesting harness for Bot6bbb DTC Intraday Strategy.
+Backtesting harness for Bot6b DTC Intraday Strategy.
 
 Feeds historical 1-minute OHLCV data through the execution engine
 and produces a full performance report with zero simulation bias.
@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from execution_engine import Bot6bbbEngine
+from execution_engine import Bot6bEngine
 from config import TRADE_CSV
 
 
@@ -155,7 +155,7 @@ def print_summary(summary: dict, symbol: str) -> None:
 # --------------------------------------------------------------------------- #
 def run_backtest(symbol: str, df: pd.DataFrame) -> dict:
     """
-    Run Bot6bbb backtest on a given OHLCV DataFrame.
+    Run Bot6b backtest on a given OHLCV DataFrame.
 
     Parameters
     ----------
@@ -168,7 +168,7 @@ def run_backtest(symbol: str, df: pd.DataFrame) -> dict:
     -------
     dict with keys: 'trades', 'summary'
     """
-    engine = Bot6bbbEngine(symbol=symbol)
+    engine = Bot6bEngine(symbol=symbol)
     trades = engine.run(df)
     summary = compute_summary(trades)
     print_summary(summary, symbol)
@@ -190,7 +190,7 @@ def _load_csv(filepath: str) -> pd.DataFrame:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Bot6bbb DTC Intraday Backtest Runner"
+        description="Bot6b DTC Intraday Backtest Runner"
     )
     parser.add_argument(
         "--symbol", type=str, default="SAMPLE", help="Stock symbol"

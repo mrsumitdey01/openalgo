@@ -1,7 +1,7 @@
 """
 bot6b/backtest_engine.py
 =======================
-Bar-by-bar backtest engine for the Bot6bbb Multi-Asset Scanner.
+Bar-by-bar backtest engine for the Bot6b Multi-Asset Scanner.
 
 DESIGN:
   1. Loads 2 years of 1-min NSE data from DuckDB in a single bulk query.
@@ -53,7 +53,7 @@ from bot6b.config import (
     TOTAL_CAPITAL,
 )
 
-log = logging.getLogger("Bot6bbb.Backtest")
+log = logging.getLogger("Bot6b.Backtest")
 
 
 def _time_str(ts: pd.Timestamp) -> str:
@@ -89,6 +89,14 @@ def _precompute_signals(data: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame
             df_out = df[["open", "high", "low", "close", "volume"]].copy()
             df_out["action_buy"] = signals["action_buy"]
             df_out["action_sell"] = signals["action_sell"]
+            df_out["hma"] = df_dtc["hma"]
+            df_out["hma_bullish"] = df_dtc["hma_bullish"]
+            df_out["hma_bearish"] = df_dtc["hma_bearish"]
+            
+            # Structural stops (shift(1) so entry bar uses previous 5 closed bars)
+            df_out["rolling_low_5"] = df_out["low"].rolling(5).min().shift(1)
+            df_out["rolling_high_5"] = df_out["high"].rolling(5).max().shift(1)
+
             result[sym] = df_out
         except Exception as e:
             log.warning(f"  Failed to compute DTC for {sym}: {e}")
@@ -254,12 +262,14 @@ def run_backtest(
             if action_buy and not action_sell:
                 entry_price = float(row["open"])
                 qty = compute_scanner_quantity(entry_price, capital_per_trade)
-                state.enter(sym, Side.LONG, entry_price, qty, ts)
+                structural_sl = float(row["rolling_low_5"])
+                state.enter(sym, Side.LONG, entry_price, qty, ts, structural_sl)
 
             elif action_sell and not action_buy:
                 entry_price = float(row["open"])
                 qty = compute_scanner_quantity(entry_price, capital_per_trade)
-                state.enter(sym, Side.SHORT, entry_price, qty, ts)
+                structural_sl = float(row["rolling_high_5"])
+                state.enter(sym, Side.SHORT, entry_price, qty, ts, structural_sl)
 
     # ------------------------------------------------------------------
     # 6. Force-close any remaining open positions (if data ends mid-day)
@@ -285,12 +295,12 @@ def _get_bars_at(
     all_signals_dict: dict[str, dict],
     symbols,
     ts: pd.Timestamp,
-) -> dict[str, tuple[float, float, float, float]]:
+) -> dict[str, dict]:
     """
-    For each symbol in `symbols`, extract (open, high, low, close) at `ts`.
+    For each symbol in `symbols`, extract data at `ts`.
     Returns only symbols that have data at exactly this timestamp.
     """
-    result: dict[str, tuple[float, float, float, float]] = {}
+    result: dict[str, dict] = {}
     for sym in symbols:
         records = all_signals_dict.get(sym)
         if records is None:
@@ -298,10 +308,15 @@ def _get_bars_at(
         row = records.get(ts)
         if row is None:
             continue
-        result[sym] = (
-            float(row["open"]),
-            float(row["high"]),
-            float(row["low"]),
-            float(row["close"]),
-        )
+        result[sym] = {
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "hma": float(row["hma"]) if pd.notna(row.get("hma")) else 0.0,
+            "hma_bullish": bool(row.get("hma_bullish", False)),
+            "hma_bearish": bool(row.get("hma_bearish", False)),
+            "rolling_low_5": float(row["rolling_low_5"]) if pd.notna(row.get("rolling_low_5")) else float(row["low"]),
+            "rolling_high_5": float(row["rolling_high_5"]) if pd.notna(row.get("rolling_high_5")) else float(row["high"]),
+        }
     return result

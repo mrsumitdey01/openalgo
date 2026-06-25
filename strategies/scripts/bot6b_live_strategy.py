@@ -52,7 +52,7 @@ def main():
                 if position and position.is_open:
                     print(f"[{now}] Hard square-off time reached. Exiting position.")
                     response = client.placesmartorder(
-                        strategy="Bot6bbb_DTC", symbol=SYMBOL, action="SELL" if position.side == Side.LONG else "BUY",
+                        strategy="Bot6b_DTC", symbol=SYMBOL, action="SELL" if position.side == Side.LONG else "BUY",
                         exchange=EXCHANGE, price_type="MARKET", product="MIS",
                         quantity=position.qty, position_size=position.qty * (-1 if position.side == Side.LONG else 1)
                     )
@@ -101,7 +101,7 @@ def main():
                     exit_px, reason = exit_result
                     print(f"[{now}] Exiting position due to: {reason.value} at approx {exit_px}")
                     response = client.placesmartorder(
-                        strategy="Bot6bbb_DTC", symbol=SYMBOL, action="SELL" if position.side == Side.LONG else "BUY",
+                        strategy="Bot6b_DTC", symbol=SYMBOL, action="SELL" if position.side == Side.LONG else "BUY",
                         exchange=EXCHANGE, price_type="MARKET", product="MIS",
                         quantity=position.qty, position_size=position.qty * (-1 if position.side == Side.LONG else 1)
                     )
@@ -133,7 +133,7 @@ def main():
                 qty = compute_quantity(latest_open)
                 print(f"[{now}] BUY signal detected. Entering LONG x{qty}")
                 response = client.placesmartorder(
-                    strategy="Bot6bbb_DTC", symbol=SYMBOL, action="BUY",
+                    strategy="Bot6b_DTC", symbol=SYMBOL, action="BUY",
                     exchange=EXCHANGE, price_type="MARKET", product="MIS",
                     quantity=qty, position_size=qty
                 )
@@ -144,7 +144,7 @@ def main():
                 qty = compute_quantity(latest_open)
                 print(f"[{now}] SELL signal detected. Entering SHORT x{qty}")
                 response = client.placesmartorder(
-                    strategy="Bot6bbb_DTC", symbol=SYMBOL, action="SELL",
+                    strategy="Bot6b_DTC", symbol=SYMBOL, action="SELL",
                     exchange=EXCHANGE, price_type="MARKET", product="MIS",
                     quantity=qty, position_size=qty * -1
                 )

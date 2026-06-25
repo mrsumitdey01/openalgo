@@ -1,7 +1,7 @@
-# Bot6bbb — DTC Intraday Stocks Execution Engine
+# Bot6b — DTC Intraday Stocks Execution Engine
 
 ## Overview
-Bot6bbb is a production-grade intraday execution daemon for **NSE cash equities**, implementing the **DTC (Dynamic Trend Confirmation)** momentum strategy. It is a direct Python translation of the TradingView Pine Script 6-EMA ribbon indicator, built with strict **zero-repainting** and **zero-lookahead-bias** guarantees.
+Bot6b is a production-grade intraday execution daemon for **NSE cash equities**, implementing the **DTC (Dynamic Trend Confirmation)** momentum strategy. It is a direct Python translation of the TradingView Pine Script 6-EMA ribbon indicator, built with strict **zero-repainting** and **zero-lookahead-bias** guarantees.
 
 ---
 

@@ -1,7 +1,7 @@
 """
 bot6b/execution_engine.py
 ========================
-Main event-driven execution loop for Bot6bbb DTC Intraday Strategy.
+Main event-driven execution loop for Bot6b DTC Intraday Strategy.
 
 DESIGN PRINCIPLES:
     1. Processes each 1-minute bar sequentially — purely procedural.
@@ -45,7 +45,7 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
-log = logging.getLogger("Bot6bbb")
+log = logging.getLogger("Bot6b")
 
 
 def _time_str(ts: pd.Timestamp) -> str:
@@ -119,13 +119,13 @@ def _log_trade(
 # --------------------------------------------------------------------------- #
 # MAIN EXECUTION ENGINE
 # --------------------------------------------------------------------------- #
-class Bot6bbbEngine:
+class Bot6bEngine:
     """
-    Event-driven bar processor for Bot6bbb.
+    Event-driven bar processor for Bot6b.
 
     Usage
     -----
-    engine = Bot6bbbEngine(symbol="RELIANCE")
+    engine = Bot6bEngine(symbol="RELIANCE")
     results = engine.run(df_ohlcv)  # returns full trade log as list of dicts
     """
 
@@ -157,13 +157,13 @@ class Bot6bbbEngine:
         df_work["action_buy"] = signals["action_buy"]
         df_work["action_sell"] = signals["action_sell"]
 
-        log.info(f"Bot6bbb started for {self.symbol} | Bars: {len(df_work)}")
+        log.info(f"Bot6b started for {self.symbol} | Bars: {len(df_work)}")
 
         # --- Step 2: Process bar by bar ---
         for ts, bar in df_work.iterrows():
             self._process_bar(ts, bar)
 
-        log.info(f"Bot6bbb finished for {self.symbol} | Trades: {len(self.trades)}")
+        log.info(f"Bot6b finished for {self.symbol} | Trades: {len(self.trades)}")
         return self.trades
 
     def _process_bar(self, ts: pd.Timestamp, bar: pd.Series) -> None:
@@ -190,10 +190,10 @@ class Bot6bbbEngine:
             return  # No further action after square-off time
 
         # ------------------------------------------------------------------ #
-        # 2. UPDATE TRAILING STOP (before checking exits)
+        # 2. UPDATE PEAK (before checking exits)
         # ------------------------------------------------------------------ #
         if self.position and self.position.is_open:
-            self.position.update_trail(bar_high, bar_low)
+            self.position.update_peak(bar_high, bar_low)
 
         # ------------------------------------------------------------------ #
         # 3. CHECK EXIT CONDITIONS
@@ -246,7 +246,7 @@ class Bot6bbbEngine:
         log.info(
             f"ENTRY FILL | {self.symbol} {side.name} x{qty} @ {entry_px:.2f} | "
             f"Time={ts.strftime('%H:%M:%S')} | "
-            f"SL={self.position.initial_sl:.2f} | TP={self.position.target:.2f}"
+            f"SL={self.position.risk_sl:.2f} | TP={self.position.target:.2f}"
         )
 
     def _exit_position(
@@ -268,7 +268,7 @@ class Bot6bbbEngine:
             "qty": pos.qty,
             "gross_pnl": round(gross_pnl, 2),
             "exit_reason": reason.value,
-            "initial_sl": round(pos.initial_sl, 2),
+            "initial_sl": round(pos.risk_sl, 2),
             "target": round(pos.target, 2),
             "peak_price": round(pos.peak_price, 2),
         }

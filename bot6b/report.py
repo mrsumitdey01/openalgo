@@ -1,7 +1,7 @@
 """
 bot6b/report.py
 ==============
-PnL reporting for the Bot6bbb Multi-Asset Scanner.
+PnL reporting for the Bot6b Multi-Asset Scanner.
 
 Takes the list of closed trade dicts from StateManager and prints
 a comprehensive backtest report to the terminal, including:
