@@ -30,9 +30,21 @@ Pine Script equivalence:
 import numpy as np
 import pandas as pd
 try:
-    from bot6.config import EMA_LENGTHS
+    from bot6.config import (
+        EMA_LENGTHS,
+        USE_VWAP_FILTER,
+        USE_RVOL_FILTER,
+        RVOL_THRESHOLD,
+        RVOL_LENGTH,
+    )
 except ImportError:
-    from config import EMA_LENGTHS  # fallback when run directly inside bot6/
+    from config import (
+        EMA_LENGTHS,
+        USE_VWAP_FILTER,
+        USE_RVOL_FILTER,
+        RVOL_THRESHOLD,
+        RVOL_LENGTH,
+    )
 
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
@@ -91,25 +103,60 @@ def compute_dtc(df: pd.DataFrame) -> pd.DataFrame:
         (e8 < e13) & (e13 < e21) & (e21 < e26) & (e26 < e34) & (e34 < e40)
     ).astype(bool)
 
+    # --- Calculate Contextual Filters (VWAP & RVOL) ---
+    # 1. VWAP (Daily Reset)
+    typical_price = (result["high"] + result["low"] + result["close"]) / 3
+    vwap_vol = result["volume"] * typical_price
+    
+    # Calculate cumulative sums grouped by date
+    # In Pandas, if index is datetime, we can group by index.date
+    # But doing this vectorized over a continuous dataframe is faster.
+    daily_groups = result.index.floor('D')
+    cum_vol = result["volume"].groupby(daily_groups).cumsum()
+    cum_vwap_vol = vwap_vol.groupby(daily_groups).cumsum()
+    result["vwap"] = cum_vwap_vol / cum_vol
+
+    # 2. RVOL (Relative Volume)
+    sma_vol = result["volume"].rolling(window=RVOL_LENGTH, min_periods=1).mean()
+    # Replace 0 with NaN to avoid division by zero
+    result["rvol"] = result["volume"] / sma_vol.replace(0, np.nan)
+    # Fill NaN with 0 (e.g. if sma_vol was 0)
+    result["rvol"] = result["rvol"].fillna(0)
+
     # --- ANTI-LOOKAHEAD SIGNAL GENERATION ---
-    # Pine: buyCond  = trendUp   and not trendUp[1]
-    # Pine: sellCond = trendDown and not trendDown[1]
-    #
-    # In Python, trendUp[1] means the PREVIOUS bar's trendUp.
-    # We use .shift(1) on the CLOSED bar series.
-    # The signal at bar[i] fires only after bar[i-1] is closed and
-    # bar[i] has completed — meaning the execution happens on bar[i+1] open.
-    # We mark the signal on bar[i] for transparency; the engine consumes
-    # the PREVIOUS bar's signal before placing an order on the CURRENT bar open.
-    # Use numpy arrays directly to avoid pandas FutureWarning on fillna
     _up = result["trend_up"].to_numpy(dtype=bool)
     _dn = result["trend_down"].to_numpy(dtype=bool)
+    
+    _close = result["close"].to_numpy()
+    _ema8 = result["ema_8"].to_numpy()
+
+    # LONG: Established uptrend AND close > dtc max ribbon (ema_8)
+    close_above_max = _close > _ema8
+    
+    # We use .shift(1) on the CLOSED bar series for the base signal
     prev_up = np.concatenate([[False], _up[:-1]])
+    prev_close_above = np.concatenate([[False], close_above_max[:-1]])
+    
+    buy_base = _up & ~prev_up & close_above_max
+
+    # SHORT: Established downtrend AND close < dtc min ribbon (ema_8)
+    close_below_min = _close < _ema8
     prev_dn = np.concatenate([[False], _dn[:-1]])
+    sell_base = _dn & ~prev_dn & close_below_min
 
-    result["buy_signal"] = _up & ~prev_up
-    result["sell_signal"] = _dn & ~prev_dn
+    # Apply contextual filters
+    _close = result["close"].to_numpy()
+    _vwap = result["vwap"].to_numpy()
+    _rvol = result["rvol"].to_numpy()
 
+    vwap_long_cond = (_close > _vwap) if USE_VWAP_FILTER else True
+    vwap_short_cond = (_close < _vwap) if USE_VWAP_FILTER else True
+    rvol_cond = (_rvol >= RVOL_THRESHOLD) if USE_RVOL_FILTER else True
+
+    result["buy_signal"] = buy_base & vwap_long_cond & rvol_cond
+    result["sell_signal"] = sell_base & vwap_short_cond & rvol_cond
+
+    result.drop(columns=["vwap", "rvol"], inplace=True, errors='ignore')
     return result
 
 
@@ -131,7 +178,21 @@ def get_actionable_signals(df_with_dtc: pd.DataFrame) -> pd.DataFrame:
     # Use numpy to avoid pandas FutureWarning on fillna with object dtype
     _buy = out["buy_signal"].to_numpy(dtype=bool)
     _sell = out["sell_signal"].to_numpy(dtype=bool)
-    out["action_buy"] = np.concatenate([[False], _buy[:-1]])
-    out["action_sell"] = np.concatenate([[False], _sell[:-1]])
+    
+    # Base shifted signals
+    shifted_buy = np.concatenate([[False], _buy[:-1]])
+    shifted_sell = np.concatenate([[False], _sell[:-1]])
+
+    # "Open matching the trade": For LONG, the execution bar's open must be 
+    # above the dtc max ribbon (ema_8). For SHORT, it must be below dtc min (ema_8).
+    # This prevents entering if the market gaps heavily against the signal.
+    _open = df_with_dtc["open"].to_numpy()
+    _ema8 = df_with_dtc["ema_8"].to_numpy()
+
+    open_matches_long = _open > _ema8
+    open_matches_short = _open < _ema8
+
+    out["action_buy"] = shifted_buy & open_matches_long
+    out["action_sell"] = shifted_sell & open_matches_short
 
     return out[["action_buy", "action_sell"]]

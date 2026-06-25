@@ -178,10 +178,14 @@ def run_backtest(
     # ------------------------------------------------------------------
     # 4. Build unified chronological timestamp index
     # ------------------------------------------------------------------
-    log.info("[BACKTEST] Building unified timestamp index...")
+    log.info("[BACKTEST] Building unified timestamp index and fast lookups...")
     all_timestamps: set[pd.Timestamp] = set()
-    for df in all_signals.values():
+    all_signals_dict = {}
+    for sym, df in all_signals.items():
         all_timestamps.update(df.index.tolist())
+        # Convert df to dictionary {Timestamp: row_dict} for O(1) fast lookup
+        all_signals_dict[sym] = df.to_dict(orient='index')
+        
     sorted_timestamps = sorted(all_timestamps)
     log.info(f"[BACKTEST] Total unique bars to process: {len(sorted_timestamps):,}")
 
@@ -211,16 +215,15 @@ def run_backtest(
         # ----------------------------------------------------------------
         if _is_after(ts, SQUARE_OFF_TIME):
             if state.open_count > 0 and current_day not in squaredoff_today:
-                # Build OHLC for all open position symbols at this bar
-                bars_now = _get_bars_at(all_signals, state.active_positions.keys(), ts)
+                bars_now = _get_bars_at(all_signals_dict, state.active_positions.keys(), ts)
                 state.eod_squareoff(bars_now, ts)
                 squaredoff_today.add(current_day)
-            continue  # Nothing else to do after 15:15
+            continue
 
         # ----------------------------------------------------------------
-        # 5b. Build OHLC snapshot for current bar (all symbols with data)
+        # 5b. Build OHLC snapshot for current bar
         # ----------------------------------------------------------------
-        bars_now = _get_bars_at(all_signals, all_signals.keys(), ts)
+        bars_now = _get_bars_at(all_signals_dict, all_signals_dict.keys(), ts)
 
         # ----------------------------------------------------------------
         # 5c. Update open positions — trail + exit checks
@@ -232,19 +235,19 @@ def run_backtest(
         # 5d. Entry scanning (only within time fences)
         # ----------------------------------------------------------------
         if _is_before(ts, SCANNER_START) or _is_after(ts, CUTOFF_TIME):
-            continue  # No new entries outside trading window
+            continue
 
         if state.open_count >= 10:
-            continue  # Position cap reached
+            continue
 
         # Scan each symbol for entry signals
-        for sym, df in all_signals.items():
-            if ts not in df.index:
+        for sym, records in all_signals_dict.items():
+            row = records.get(ts)
+            if row is None:
                 continue
             if not state.can_enter(sym):
                 continue
 
-            row = df.loc[ts]
             action_buy = bool(row["action_buy"])
             action_sell = bool(row["action_sell"])
 
@@ -279,7 +282,7 @@ def run_backtest(
 
 
 def _get_bars_at(
-    all_signals: dict[str, pd.DataFrame],
+    all_signals_dict: dict[str, dict],
     symbols,
     ts: pd.Timestamp,
 ) -> dict[str, tuple[float, float, float, float]]:
@@ -289,10 +292,12 @@ def _get_bars_at(
     """
     result: dict[str, tuple[float, float, float, float]] = {}
     for sym in symbols:
-        df = all_signals.get(sym)
-        if df is None or ts not in df.index:
+        records = all_signals_dict.get(sym)
+        if records is None:
             continue
-        row = df.loc[ts]
+        row = records.get(ts)
+        if row is None:
+            continue
         result[sym] = (
             float(row["open"]),
             float(row["high"]),
