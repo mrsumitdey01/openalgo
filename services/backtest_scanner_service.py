@@ -9,7 +9,7 @@ def run_scanner_backtest(params: dict) -> tuple[bool, dict, int]:
     """
     try:
         bot_id = params.get("bot_id", "bot6")
-        if bot_id not in ["bot6", "bot6b"]:
+        if bot_id not in ["bot6", "bot6b", "bot6c"]:
             return False, {"status": "error", "message": f"Unsupported scanner bot: {bot_id}"}, 400
             
         engine_module = importlib.import_module(f"{bot_id}.backtest_engine")

@@ -1714,6 +1714,7 @@ export default function Backtest() {
                     <SelectContent>
                       <SelectItem value="bot6">Bot 6 Scanner (Stocks)</SelectItem>
                       <SelectItem value="bot6b">Bot 6b Scanner (Stocks Clone)</SelectItem>
+                      <SelectItem value="bot6c">Bot6c Scanner (Stocks Clone)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1910,6 +1911,7 @@ function PaperTradePanel() {
     if (bot === 'bot5') return 'Bot 5 (Straddle Seller)'
     if (bot === 'bot6') return 'Bot 6 (Scanner)'
     if (bot === 'bot6b') return 'Bot 6b (Scanner Clone)'
+    if (bot === 'bot6c') return 'Bot6c (Scanner Clone)'
     return bot
   }
 
@@ -2051,6 +2053,7 @@ function PaperTradePanel() {
               <SelectItem value="bot5">Bot 5 (Straddle)</SelectItem>
               <SelectItem value="bot6">Bot 6 (Scanner)</SelectItem>
               <SelectItem value="bot6b">Bot 6b (Scanner)</SelectItem>
+                <SelectItem value="bot6c">Bot6c (Scanner Clone)</SelectItem>
             </SelectContent>
           </Select>
           <Select value={filterExchange} onValueChange={setFilterExchange}>
